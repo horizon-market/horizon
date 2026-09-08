@@ -2,7 +2,7 @@
 
 Planning snapshot: **September 8, 2026**. Event: **ETHOnline 2026**. Team: **one human builder with AI assistance**. Original delivery window: **four days**.
 
-This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the phased roadmap, current status, and acceptance checks. Everything below is a product decision, proposed design, or research finding; it is not a claim that the software exists.
+This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Phase 0's local foundation now exists; the prediction-market behavior below remains a product design until its phase is implemented and tested.
 
 ## 1. Product thesis
 
@@ -204,7 +204,7 @@ Keep financial amounts as integers with explicit token units at API boundaries. 
 
 The user initially suggested Django, then **selected a TypeScript backend**. The assistant's recommended stack is **Solidity/Foundry + React/Vite/TypeScript + Node/Express/TypeScript + PostgreSQL**, mainly to share off-chain math and route types across frontend, backend, and agent client. Do not reopen the backend-language decision in a new task.
 
-The user specifically asked whether TypeScript would make an admin panel, Celery-style tasks, or an ORM difficult. The recommendation is to assemble those capabilities using AdminJS, Prisma, and pg-boss. These supporting-library choices are recommendations, not already installed dependencies or separately confirmed user preferences. Keep contract/off-chain agreement tests regardless of library selection.
+The user specifically asked whether TypeScript would make an admin panel, Celery-style tasks, or an ORM difficult. Phase 0 now implements those foundations with AdminJS, Prisma, and pg-boss: authenticated record inspection, migrated PostgreSQL models, and a separate worker with persisted jobs and tested retries. Versions are pinned in package.json and package-lock.json. The supporting tools were selected during implementation; TypeScript was explicitly chosen by the user. Keep contract/off-chain agreement tests as financial functionality is added.
 
 ### Recommended admin, ORM, and background-job setup
 
@@ -227,9 +227,9 @@ Proposed defaults from the roadmap, subject to implementation validation:
 
 Open work that should not restart product discovery:
 
-1. **Supporting-library compatibility:** TypeScript is confirmed. Verify Express/AdminJS/Prisma compatibility and the pg-boss worker setup before pinning versions and scaffolding.
-2. **External access:** World app/Sandbox enablement, Graph credentials, funded wallets, RPC access, and payment receiver setup.
-3. **Dependency compatibility:** exact Aqua/SwapVM commits and registry/router deployment configuration; avoid mixing APIs from different generations.
+1. **Supporting-library follow-up:** the pinned Express/AdminJS/Prisma/pg-boss stack passes local integration checks. Resolve or assess recorded transitive dependency advisories before exposing the admin publicly; real creation/payment handlers and admin actions are not implemented yet.
+2. **External access:** the user will provide testnet accounts/APIs later. World app/Sandbox enablement, Graph credentials, funded wallets, RPC access, and payment receiver setup remain pending.
+3. **Contract integration:** source compatibility and the custom opcode hook are tested locally. Verify official deployed bytecode and implement/deploy Horizon's market-aware router; avoid mixing APIs from different generations.
 4. **Implementation precision:** finalize outcome decimals, normalized price/quantity units, integer rounding, dust redemption, and buy-budget sizing before the curve kernel is considered executable.
 5. **Service configuration:** final demo creation amount and discount limits, LLM provider, and hosting target. Earlier values are proposals, not user approvals.
 6. **Resolution timing:** define the close/resolution schedule and behavior if the admin does not resolve. An oracle/dispute system is out of scope, but the UI must disclose dependence on the resolver.
@@ -241,9 +241,9 @@ Open work that should not restart product discovery:
 - [SwapVM checkout](/Users/xana/work/ethglobal2026/swap-vm): inspected for output-first settlement and pre-transfer-in callbacks.
 - [ArcBook reference](/Users/xana/work/ethglobal2026/liquid_OB/README.md): prior-event project with curves, a solver, atomic batch execution, and indexing. Its automatic two-sided inventory recycling is not Horizon's selected behavior.
 
-Observed checkout HEADs during planning were Aqua `9c5c42e5840e8741fba3597c48456c9510212b66` and SwapVM `9502fd44254fef12fa448c3059868505b4c9dfff`. These identify the inspected snapshots, not approved pins or verified deployments. The newer local SwapVM API differs from ArcBook's older integration; inspect actual signatures rather than copying call sites.
+Observed checkout HEADs during planning were Aqua `9c5c42e5840e8741fba3597c48456c9510212b66` and SwapVM `9502fd44254fef12fa448c3059868505b4c9dfff`. Implementation pins SwapVM at that revision and Aqua at its declared dependency, `v1.0.0` / `098b4c5d8eec67677f7ca861ca991af56024d9c5`. Exact origins, licenses, and retained source hashes are recorded in `contracts/vendor-lock.json` and `contracts/README.md`. These are source pins, not verified deployments. The newer SwapVM API differs from ArcBook's older integration.
 
-Foundry (`forge` and `anvil`), Node, pnpm, and yarn were present in this environment. Horizon compilation, dependency installation, wallet integration, public deployment, and end-to-end tests have not been performed.
+Horizon now compiles under Node 24.10.0/TypeScript 5.9.3 and Solidity 0.8.30/Foundry 1.2.3. Two unit tests, three actual PostgreSQL integration tests, and three protocol tests pass locally. The custom test router enables LimitSwap through `_runOpcode`; the default Aqua dispatcher omits it. Tests establish token transfers, callback ordering, and shared-wallet depletion using mock assets. They do not prove a backed complementary match. Wallet payment integration, public deployment, live Graph/World flows, and the complete product remain unimplemented. See OPERATIONS.md for exact commands and pending prerequisites.
 
 Consult applicable local instructions before implementation. The user-provided workspace instruction references `/Users/xana/.codex/RTK.md`, which requires shell commands to be prefixed with `rtk`. If operating inside the SwapVM checkout, also read its own `AGENTS.md`.
 

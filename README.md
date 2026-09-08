@@ -13,12 +13,13 @@ Read this roadmap and [PROJECT_BRIEF.md](/Users/xana/work/ethglobal2026/horizon/
 - Build capacity: **one human builder with AI assistance**.
 - Original time budget: **four days**, stated on September 8, 2026. Reassess remaining time when continuing; a new task does not restart the clock.
 - Required integrations: **1inch Aqua/SwapVM, The Graph, Hedera x402, and World**. All four are required, not optional stretch goals.
-- Current status, September 8, 2026: **planning and documentation only**. The folder was empty before these two documents were added. Horizon has no application code, deployed contracts, configured integrations, or passing tests yet.
-- Initial milestone: Phase 0 integration checks, followed by the flat-price complementary-match contract proof.
+- Current status, September 8, 2026: **Phase 0 local foundation implemented and tested**. Express, authenticated read-only AdminJS, Prisma/PostgreSQL, a separate durable worker, source pins, and local Aqua/SwapVM transfer probes work. Live deployments and sponsor account checks remain pending; the user will provide accounts/APIs later.
+- Next milestone: Phase 1 market lifecycle and the first **fully backed** flat-price complementary match. The existing protocol probe uses pre-minted test assets and does not yet implement this match.
+- Setup, test evidence, current limitations, and pending access: [OPERATIONS.md](OPERATIONS.md). Protocol source provenance: [contracts/README.md](contracts/README.md).
 
 Useful continuation prompt:
 
-> Read /Users/xana/work/ethglobal2026/horizon/README.md and /Users/xana/work/ethglobal2026/horizon/PROJECT_BRIEF.md. Continue Horizon from this context rather than restarting product discovery. Preserve the confirmed choices, inspect the actual implementation state, and work on the phase I request. The user has selected a TypeScript backend; do not reopen the Django-versus-TypeScript decision. Distinguish that confirmed choice from supporting-library recommendations, and verify package compatibility before scaffolding. Keep these documents updated with completed work and evidence.
+> Read /Users/xana/work/ethglobal2026/horizon/README.md, PROJECT_BRIEF.md, and OPERATIONS.md. Continue Horizon from this context rather than restarting product discovery. Phase 0's local TypeScript/admin/ORM/worker stack is installed and tested; source pins and a local Aqua/SwapVM transfer probe exist. Preserve confirmed product choices and work on the requested phase. The next contract milestone is Phase 1's backed complementary match. Live sponsor access is pending until the user provides accounts/APIs. Keep these documents updated with evidence.
 
 ## Confirmed product choices
 
@@ -39,18 +40,18 @@ Useful continuation prompt:
 
 The user initially considered Django and has now **selected TypeScript for the backend**. Their follow-up concern was preserving convenient admin tooling, an ORM, and Celery-style background tasks. All three can be provided within the TypeScript stack.
 
-Working stack recommendations; exact libraries and versions still require integration checks:
+Implemented backend and contract foundation, with the frontend/indexing stack still planned:
 
 - Contracts: Solidity with Foundry, extending pinned official Aqua/SwapVM sources.
 - Frontend: React, Vite, TypeScript, wagmi/viem, plus a Hedera-native wallet integration for payments.
-- Backend: Node.js, Express, TypeScript.
-- Persistence/ORM: PostgreSQL with Prisma for creation requests, payment state, and discount usage.
-- Admin: AdminJS with an Express plugin and compatible Prisma adapter; authenticated workflow records and explicit administrative actions.
-- Background jobs: pg-boss, using PostgreSQL, with a worker process from the same backend project for creation, reconciliation, and retries.
+- Backend: Node 24.10.0, Express 4.22.2, TypeScript 5.9.3.
+- Persistence/ORM: PostgreSQL with Prisma 6.19.3; draft request metadata, diagnostic jobs, and admin sessions are implemented. Payment/discount state comes later.
+- Admin: AdminJS 7.8.17, Express adapter 6.1.1, Prisma adapter 5.0.4; authenticated record inspection works. Deliberate administrative actions are later work.
+- Background jobs: pg-boss 10.4.2 with a separate worker process. Durable diagnostic jobs, retries, and duplicate-effect prevention are tested; real service handlers come later.
 - Indexing: a deployed Subgraph consumed through a live Graph provider.
 - Networks: Ethereum Sepolia for trading and Hedera testnet for service payments.
 
-TypeScript is the confirmed language choice; Express, Prisma, AdminJS, and pg-boss are the recommended supporting tools, not installed or tested components. Pin a compatible AdminJS/Prisma combination rather than assuming their newest versions work together. Plan a persistent Node worker runtime alongside the API; deployment hosting and credentials remain to be established. Background service jobs do not introduce an autonomous trading matcher.
+TypeScript is the confirmed language choice. The selected supporting libraries are now installed, pinned, and locally tested. See OPERATIONS.md for dependency advisories to resolve or assess before public admin exposure. Hosting and external credentials remain to be established. Background service jobs do not introduce an autonomous trading matcher.
 
 ## Four-day roadmap
 
@@ -58,14 +59,17 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 
 ### Phase 0 — Integration checks: Day 1 opening
 
-- [ ] Establish the Horizon repository and record dependency/source provenance with normal incremental commits.
-- [ ] Pin compatible official Aqua/SwapVM sources; verify the chosen deployed Aqua registry and custom-router integration path.
+- [x] Establish the Horizon repository and record dependency/source provenance with normal incremental commits.
+- [x] Pin compatible official Aqua/SwapVM sources and test a custom opcode extension with actual local token transfers and output-first callbacks.
+- [ ] Verify the chosen deployed Aqua registry and the eventual Horizon router on Sepolia.
 - [ ] Establish trading-network RPC access, gas, and test USDC.
 - [ ] Confirm Graph Studio access and deploy a minimal live indexing path as soon as there are relevant events.
 - [ ] Check the World developer app and request Selfie Check/Sandbox access if necessary.
 - [ ] Prove a small Blocky402-settled Hedera payment from an agent and from a browser wallet.
 - [x] Record the user's TypeScript backend selection.
-- [ ] Verify the Express/admin/ORM integration and durable-worker setup before pinning package versions.
+- [x] Verify and pin the Express/admin/ORM integration and separate durable-worker setup.
+
+**Local evidence:** TypeScript build/typecheck, two unit tests, three PostgreSQL integration tests, three Foundry tests, matching database migration/schema, and 329 verified vendor file hashes. Admin login renders in a browser. `npm run doctor` confirms advertised Blocky402 Hedera testnet v2 capability and reports the outstanding live checks as pending. CI is configured but has not run remotely.
 
 **Exit:** versions and network configuration are recorded, browser/agent signing feasibility is demonstrated, and World access status is known. An unresolved external dependency remains visible while independent work proceeds.
 
