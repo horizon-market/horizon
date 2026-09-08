@@ -1,0 +1,58 @@
+import type { PrismaClient } from '@prisma/client';
+import type { Config } from './config.js';
+import { MarketService } from './trading/markets.js';
+import { createDraftProvider } from './creation/ai.js';
+import { createVerifier } from './world/verifier.js';
+import { createFacilitator } from './payments/x402.js';
+import { CreationService, WorkflowError } from './creation/service.js';
+import { RegistryMarketDeployer } from './creation/onchain.js';
+import { AdminService, ChainResolutionSubmitter } from './admin/service.js';
+
+export type QueueBindings = { enqueueCreation?: (requestId: string) => Promise<void>; enqueueResolution?: (resolutionId: string) => Promise<void> };
+
+/** One wiring point for the API process, the worker process and integration tests. */
+export function buildServices(config: Config, db: PrismaClient, queue: QueueBindings = {}) {
+  const markets = config.trading ? new MarketService(config.trading) : undefined;
+  const provider = createDraftProvider(config.ai);
+  const verifier = createVerifier(config.world);
+  const facilitator = createFacilitator(config.payments);
+  const deployer = config.creation ? new RegistryMarketDeployer(config.creation) : undefined;
+  const submitter = config.creation ? new ChainResolutionSubmitter(config.creation) : undefined;
+  const creation = new CreationService({
+    db, provider, verifier, facilitator, payments: config.payments, world: config.world, deployer,
+    enqueue: queue.enqueueCreation,
+    closeBounds: { minSeconds: config.creation?.minCloseInSeconds ?? 3600, maxSeconds: config.creation?.maxCloseInSeconds ?? 365 * 24 * 3600 },
+    // Drafting is grounded on live indexed markets; an indexer outage is reported, never assumed empty.
+    context: async () => {
+      if (!markets) return { available: false, context: { indexedBlock: -1, markets: [] } };
+      try {
+        const snapshot = await markets.graph.indexedMarkets();
+        return { available: true, context: { indexedBlock: snapshot.block, markets: snapshot.markets.map(market => ({
+          id: market.id, question: market.question, closeAt: new Date(market.closeAt * 1000).toISOString(), result: market.result })) } };
+      } catch { throw new WorkflowError('market_context_unavailable', 503); }
+    },
+  });
+  const admin = new AdminService({ db, markets, submitter, enqueueCreation: queue.enqueueCreation, enqueueResolution: queue.enqueueResolution });
+  return { markets, creation, admin, provider, verifier, facilitator, deployer, submitter };
+}
+
+export function publicConfig(config: Config, services: ReturnType<typeof buildServices>) {
+  return {
+    chainId: 11155111,
+    // Zero maker, taker, routing and protocol trading fees. The creation charge below is separate.
+    fees: { maker: 0, taker: 0, routing: 0, protocol: 0, note: 'Horizon takes no trading fee. Network gas is separate.' },
+    trading: config.trading ? { registry: config.trading.registry, router: config.trading.router, executor: config.trading.executor,
+      aqua: config.trading.aqua, usdc: config.trading.usdc, decimals: 6, maxRouteFills: 4 } : null,
+    creation: {
+      available: Boolean(config.payments.payTo),
+      priceUnits: config.payments.priceUnits.toString(), discountBps: config.payments.discountBps,
+      asset: config.payments.asset, assetDecimals: config.payments.assetDecimals, network: config.payments.network,
+      settlementMode: config.payments.mode, facilitator: services.facilitator.name,
+      note: 'A one-off x402 charge for the market creation service. It is unrelated to trading, which has no fee.',
+    },
+    ai: { provider: services.provider.name, mode: services.provider.mode },
+    world: { available: services.verifier.available, access: config.world.access, reason: services.verifier.reason, action: config.world.action, appId: config.world.appId },
+    resolution: { centralized: true, disclosed: true, resolver: services.submitter?.resolver ?? null,
+      invalidPayout: '0.5 USDC per outcome token', note: 'A disclosed Horizon admin resolves markets to YES, NO or INVALID with an evidence reference.' },
+  };
+}

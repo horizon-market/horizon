@@ -18,3 +18,12 @@ export function cumulative(s: Curve, q: bigint): bigint {
 export function curveCost(s: Curve, filled: bigint, shares: bigint): bigint {
   return cumulative(s, filled + shares) - cumulative(s, filled);
 }
+
+/** Marginal price in micro-USDC at the current fill position; display only, never a quote. */
+export function marginalPrice(s: Curve, filled: bigint): number {
+  const shape = s.flags >> 2;
+  const size = s.maxShares;
+  if (size <= 0n || shape < 1 || shape > 3) throw new Error('invalid_curve');
+  const position = filled >= size ? 1 : Number(filled) / Number(size);
+  return Math.round(s.startPrice + (s.endPrice - s.startPrice) * position ** shape);
+}

@@ -8,6 +8,17 @@ import { createApp } from '../src/app.js';
 import { createDatabase } from '../src/db.js';
 import { hashPassword } from '../src/password.js';
 import { enqueueProbe, PROBE_QUEUE, recordProbe, startQueue, type ProbeData } from '../src/jobs.js';
+import { loadConfig, type Config } from '../src/config.js';
+
+function testConfig(overrides: Partial<Config> & { DATABASE_URL: string; ADMIN_PASSWORD_HASH: string }): Config {
+  return {
+    ...loadConfig({
+      NODE_ENV: 'test', DATABASE_URL: overrides.DATABASE_URL, ADMIN_EMAIL: 'test@horizon.local',
+      ADMIN_PASSWORD_HASH: overrides.ADMIN_PASSWORD_HASH, SESSION_SECRET: randomUUID() + randomUUID(),
+    }),
+    ...overrides,
+  };
+}
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error('Set TEST_DATABASE_URL to the migrated local horizon_test database.');
@@ -46,7 +57,7 @@ test('Prisma records appear in authenticated AdminJS; anonymous access and write
   const key = randomUUID();
   const record = await db.creationRequest.create({ data: { idempotencyKey: key, question: 'Foundation inspection', requesterKind: 'human' } });
   const password = `test-${randomUUID()}`;
-  const built = await createApp({ NODE_ENV: 'test', HOST: '127.0.0.1', PORT: 3001, DATABASE_URL: url!, ADMIN_EMAIL: 'test@horizon.local', ADMIN_PASSWORD_HASH: await hashPassword(password), SESSION_SECRET: randomUUID(), TRUST_PROXY_HOPS: 0 }, db);
+  const built = await createApp(testConfig({ DATABASE_URL: url!, ADMIN_PASSWORD_HASH: await hashPassword(password) }), db);
   const server = built.app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();

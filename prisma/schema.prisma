@@ -12,13 +12,116 @@ model CreationRequest {
   id             String   @id @default(uuid()) @db.Uuid
   idempotencyKey String   @unique
   question       String
-  requesterKind String
+  requesterKind  String
   status         String   @default("DRAFT")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  // Requester identity and a hashed per-request bearer token. The plaintext token is
+  // returned exactly once and never stored, so admin database access cannot resume a request.
+  requester       String  @default("")
+  accessTokenHash String  @default("")
+  // The exact draft a human reviewed. approvedHash must equal draftHash before payment.
+  draft         Json?
+  draftHash     String?
+  draftProvider String?
+  draftMode     String?
+  duplicates    Json?
+  approvedAt    DateTime?
+  approvedHash  String?
+  // Discount and price are decided server-side when payment requirements are issued.
+  discountBps   Int      @default(0)
+  discountNote  String   @default("")
+  priceUnits    String   @default("0")
+  marketAddress String?
+  creationTxHash String?
+  failureCode   String?
+  failureDetail String?
+  attempts      Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  payment      PaymentIntent?
+  verification HumanVerification?
+
+  @@index([status, createdAt])
 }
 
-// A diagnostic queue side effect; this is not a payment or market creation handler.
+// Exactly one payment intent per creation request; retries reuse it and never re-settle.
+model PaymentIntent {
+  id             String   @id @default(uuid()) @db.Uuid
+  requestId      String   @unique @db.Uuid
+  request        CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  status         String   @default("REQUIRED")
+  scheme         String   @default("exact")
+  network        String
+  asset          String
+  amountUnits    String
+  payTo          String
+  nonce          String   @unique
+  facilitator    String
+  payloadHash    String?  @unique
+  transactionRef String?  @unique
+  payer          String?
+  verifiedAt     DateTime?
+  settledAt      DateTime?
+  failureCode    String?
+  attempts       Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([status])
+}
+
+// Minimum retained verification result: no image, document or raw proof is stored.
+model HumanVerification {
+  id             String   @id @default(uuid()) @db.Uuid
+  requestId      String   @unique @db.Uuid
+  request        CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  nullifierHash  String
+  credentialType String
+  verifier       String
+  verifiedAt     DateTime @default(now())
+
+  @@index([nullifierHash])
+}
+
+// One discounted creation per verified credential per UTC day.
+model DiscountUsage {
+  id            String   @id @default(uuid()) @db.Uuid
+  nullifierHash String
+  day           String
+  requestId     String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  @@unique([nullifierHash, day])
+}
+
+// Admin resolution intent; the disclosed resolver key submits it from the worker.
+model MarketResolution {
+  id          String   @id @default(uuid()) @db.Uuid
+  market      String   @unique
+  result      String
+  evidence    String
+  status      String   @default("PENDING")
+  txHash      String?
+  failureCode String?
+  attempts    Int      @default(0)
+  requestedBy String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Append-only record of deliberate administrative actions.
+model AdminAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  actor     String
+  action    String
+  subject   String
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// A durable job side effect keyed by a stable business identifier.
 model JobRun {
   id          String   @id @db.Uuid
   queueJobId  String   @db.Uuid

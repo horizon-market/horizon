@@ -23,6 +23,10 @@ export const marketAbi = parseAbi([
   'function isOpen() view returns (bool)', 'function yesToken() view returns (address)',
   'function noToken() view returns (address)', 'function closeAt() view returns (uint40)',
   'function mintPair(uint256 quantity,address yesRecipient,address noRecipient)',
+  'function result() view returns (uint8)', 'function collateral() view returns (uint256)',
+  'function resolver() view returns (address)', 'function invalidRemainder(address) view returns (uint256)',
+  'function redeem(uint256 yesQuantity,uint256 noQuantity,address recipient) returns (uint256)',
+  'function resolve(uint8 result,string evidence)',
 ]);
 export const aquaAbi = parseAbi([
   'function safeBalances(address maker,address app,bytes32 strategyHash,address token0,address token1) view returns (uint256,uint256)',
