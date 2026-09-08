@@ -38,7 +38,11 @@
     "vendor:verify": "node --import tsx scripts/verify-vendor.ts",
     "contracts:build": "forge build --root contracts",
     "contracts:test": "forge test --root contracts -vv",
-    "contracts:demo": "forge test --root contracts --match-test testSixtyFortyBackedMatchAndWinnerRedemption -vvvv"
+    "contracts:demo": "forge test --root contracts --match-test testSixtyFortyBackedMatchAndWinnerRedemption -vvvv",
+    "web:install": "npm --prefix web install",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:typecheck": "npm --prefix web run typecheck"
   },
   "dependencies": {
     "@adminjs/express": "6.1.1",
