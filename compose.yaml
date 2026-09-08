@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:54329:5432"
     volumes:
       - horizon-postgres:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U horizon -d horizon"]
       interval: 2s

@@ -10,28 +10,53 @@ Use Node **24.10.0** (`.nvmrc`) and npm **11.6.1**. The workspace also has Node 
 
 ```sh
 cd /Users/xana/work/ethglobal2026/horizon
+source ~/.nvm/nvm.sh
 nvm use
+export PATH="$NVM_BIN:$PATH"
+rehash
 npm ci
 npm run setup:local
 npm run db:up
 npm run db:generate
 npm run db:migrate
+npm run db:test:migrate
 npm run dev
 ```
 
+If `npm ci` reports `EBADENGINE` with Node 26, run the `source` and `nvm use` commands above in the **same terminal** before retrying. `.nvmrc` records the required version but does not automatically switch your shell. Node 24.10.0 is already installed on this machine. In an IDE, select `~/.nvm/versions/node/v24.10.0/bin/node` as the project's Node interpreter as well. Keep `engine-strict` enabled so installs use the tested runtime.
+
+On this machine, `.zshrc` prepends `/opt/homebrew/bin` after loading nvm. Consequently, `nvm use` can announce Node 24 while `node` and `npm` still resolve to Homebrew's Node 26. If that happens, explicitly put the installed Node 24 directory first in the current terminal:
+
+```sh
+export PATH="$HOME/.nvm/versions/node/v24.10.0/bin:$PATH"
+rehash
+node --version  # must print v24.10.0
+npm --version   # bundled version: 11.6.1
+npm ci
+```
+
+This changes the current terminal only. The global shell configuration was not modified.
+
 `setup:local` creates `.env` and a random admin password in `.local/admin-password.txt`, both private and ignored by Git. It refuses to overwrite an existing `.env`. In this workspace these files have already been created, so skip that step. The admin email is `admin@horizon.local`. Open [the local admin](http://127.0.0.1:3001/admin) and read the password from the local file; do not commit or paste it into a task.
 
-Docker Compose provides PostgreSQL on loopback port **54329** and retains data when stopped with `npm run db:down`. Its fixed password is for this local database only. Docker was not running during implementation, so verification used the installed PostgreSQL **18.2** in an isolated cluster under `.local/pgdata`, on the same port. The native test cluster uses trust authentication on loopback. Stop it before starting the Compose database on that port:
+**Docker is now the selected database runtime.** `npm run db:up` starts PostgreSQL 18.0 and waits for its health check. The initial-volume SQL automatically creates both `horizon` and `horizon_test`, owned by `horizon`. The container listens at `127.0.0.1:54329`; `.env` contains the corresponding application and test connection URLs. There is no need to run `createdb` during a fresh setup.
+
+Useful database commands:
 
 ```sh
-/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D .local/pgdata stop
+npm run db:up
+npm run db:migrate
+npm run db:test:migrate
+docker compose ps
+docker compose exec db psql -U horizon -d horizon
+npm run db:down
 ```
 
-Restart that existing native cluster, if preferred:
+The named Docker volume retains data when the container stops or is recreated. The fixed Compose password is for local development only. `docker compose exec` requires a running container; start it with `npm run db:up` first. The database username is `horizon`, not `user`.
 
-```sh
-/opt/homebrew/opt/postgresql@18/bin/pg_ctl -D .local/pgdata -l .local/postgres.log -o "-p 54329 -h 127.0.0.1 -k /Users/xana/work/ethglobal2026/horizon/.local/pgsocket" start
-```
+The earlier native PostgreSQL cluster was stopped to free port 54329. Its files remain under `.local/pgdata`, and its application database was backed up to `.local/backups/native-horizon-before-docker.dump`. Docker starts with fresh application/test databases; the old diagnostic job and admin sessions are retained in the backup rather than imported. Do not start the native cluster on port 54329 while Docker is running.
+
+Docker verification on September 8: `horizon-db-1` healthy on port 54329; both databases present; both migrations applied; TypeScript typecheck and all three admin/worker integration tests passed against the container.
 
 ## API, admin, and worker
 
@@ -63,13 +88,15 @@ npm run vendor:verify
 npm run contracts:test
 ```
 
-Database integration tests require a **dedicated localhost database named `horizon_test`**. They refuse other database names/hosts. The local native instance already has it. With Compose, create it once and apply the migration:
+Database integration tests require a **dedicated localhost database named `horizon_test`**. They refuse other database names/hosts. Docker creates this database on first initialization, and the test command reads `TEST_DATABASE_URL` from `.env` (explicit environment variables still take precedence).
 
 ```sh
-docker compose exec db createdb -U horizon horizon_test
-DATABASE_URL=postgresql://horizon:horizon_local_only@127.0.0.1:54329/horizon_test npm run db:migrate
-TEST_DATABASE_URL=postgresql://horizon:horizon_local_only@127.0.0.1:54329/horizon_test npm run test:integration
+npm run db:up
+npm run db:test:migrate
+npm run test:integration
 ```
+
+For a pre-existing Docker volume created before the initialization SQL was added, create the missing test database once with `docker compose exec db createdb -U horizon horizon_test`, then apply its migration. Initialization scripts do not rerun against an existing volume.
 
 Verified locally: TypeScript typecheck/build; two unit tests; three actual PostgreSQL integration tests covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry; three Foundry tests covering official-source token transfers, callback ordering, and shared-wallet depletion. Prisma migration diff against the live test schema reported no difference. The browser login page rendered successfully. The GitHub workflow runs the local checks after push, but remote CI has not run yet.
 

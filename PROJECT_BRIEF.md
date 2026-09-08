@@ -214,7 +214,7 @@ The user specifically asked whether TypeScript would make an admin panel, Celery
 
 BullMQ is another Celery-style option with retries, schedules, and worker concurrency; its standard Redis-backed setup would add another service. It is an alternative, not an additional queue to run alongside pg-boss for this MVP. [BullMQ documentation](https://docs.bullmq.io/)
 
-The minimum operational layout is an HTTP API/admin process, a worker process, and PostgreSQL. Choose hosting that can run the worker continuously or provide an equivalent durable execution model; returning an HTTP response must not be assumed to keep an in-process task alive. These are service-maintenance jobs, not an autonomous market matcher or an AI resolver. Market close checks remain enforced on-chain even if a scheduled job is late.
+The minimum operational layout is an HTTP API/admin process, a worker process, and PostgreSQL. The user subsequently selected Docker for local PostgreSQL; Compose initializes the application and test databases, and the earlier native cluster is preserved but stopped. Choose hosting that can run the worker continuously or provide an equivalent durable execution model; returning an HTTP response must not be assumed to keep an in-process task alive. These are service-maintenance jobs, not an autonomous market matcher or an AI resolver. Market close checks remain enforced on-chain even if a scheduled job is late.
 
 Proposed defaults from the roadmap, subject to implementation validation:
 

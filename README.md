@@ -45,7 +45,7 @@ Implemented backend and contract foundation, with the frontend/indexing stack st
 - Contracts: Solidity with Foundry, extending pinned official Aqua/SwapVM sources.
 - Frontend: React, Vite, TypeScript, wagmi/viem, plus a Hedera-native wallet integration for payments.
 - Backend: Node 24.10.0, Express 4.22.2, TypeScript 5.9.3.
-- Persistence/ORM: PostgreSQL with Prisma 6.19.3; draft request metadata, diagnostic jobs, and admin sessions are implemented. Payment/discount state comes later.
+- Persistence/ORM: Docker PostgreSQL with Prisma 6.19.3; draft request metadata, diagnostic jobs, and admin sessions are implemented. Payment/discount state comes later.
 - Admin: AdminJS 7.8.17, Express adapter 6.1.1, Prisma adapter 5.0.4; authenticated record inspection works. Deliberate administrative actions are later work.
 - Background jobs: pg-boss 10.4.2 with a separate worker process. Durable diagnostic jobs, retries, and duplicate-effect prevention are tested; real service handlers come later.
 - Indexing: a deployed Subgraph consumed through a live Graph provider.
