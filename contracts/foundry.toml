@@ -1,0 +1,19 @@
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["vendor"]
+solc_version = "0.8.30"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 700
+via_ir = true
+remappings = [
+  "@1inch/aqua/=vendor/aqua/",
+  "@1inch/swap-vm/=vendor/swap-vm/",
+  "@1inch/solidity-utils/=vendor/solidity-utils/",
+  "@openzeppelin/contracts/=vendor/openzeppelin/"
+]
+
+[fmt]
+line_length = 120
