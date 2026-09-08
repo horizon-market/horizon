@@ -9,6 +9,7 @@ import { rateLimit } from 'express-rate-limit';
 import type { PrismaClient } from '@prisma/client';
 import type { Config } from './config.js';
 import { verifyPassword } from './password.js';
+import { tradingRoutes } from './trading/http.js';
 
 AdminJS.registerAdapter({ Database, Resource });
 
@@ -16,6 +17,7 @@ export async function createApp(config: Config, db: PrismaClient) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.TRUST_PROXY_HOPS);
+  app.use('/api', express.json({ limit: '16kb' }), tradingRoutes(config.trading));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok', service: 'horizon-api' }));
   app.get('/health/ready', async (_req, res) => {
     try {

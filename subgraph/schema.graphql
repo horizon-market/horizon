@@ -1,0 +1,50 @@
+type Market @entity(immutable: false) {
+  id: Bytes!
+  creationId: Bytes!
+  question: String!
+  rules: String!
+  evidenceSource: String!
+  closeAt: BigInt!
+  resolver: Bytes!
+  yesToken: Bytes!
+  noToken: Bytes!
+  result: Int!
+  resolutionEvidence: String!
+  collateral: BigInt!
+  createdAt: BigInt!
+  strategies: [Strategy!]! @derivedFrom(field: "market")
+}
+type Strategy @entity(immutable: false) {
+  id: Bytes!
+  market: Market!
+  maker: Bytes!
+  flags: Int!
+  startPrice: BigInt!
+  endPrice: BigInt!
+  maxShares: BigInt!
+  salt: Bytes!
+  filled: BigInt!
+  active: Boolean!
+  publishedAt: BigInt!
+}
+type Fill @entity(immutable: true) {
+  id: Bytes!
+  strategy: Strategy!
+  shares: BigInt!
+  usdc: BigInt!
+  block: BigInt!
+  transaction: Bytes!
+}
+type Route @entity(immutable: true) {
+  id: Bytes!
+  market: Market!
+  taker: Bytes!
+  recipient: Bytes!
+  isYes: Boolean!
+  isBuy: Boolean!
+  shares: BigInt!
+  usdc: BigInt!
+  fills: BigInt!
+  transaction: Bytes!
+  block: BigInt!
+}

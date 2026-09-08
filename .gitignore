@@ -10,3 +10,7 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 .DS_Store
+subgraph/generated/
+subgraph/build/
+subgraph/abis/
+subgraph/subgraph.yaml

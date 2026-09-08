@@ -1,0 +1,47 @@
+{
+  "chainId": 11155111,
+  "address": "0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a",
+  "runtimeHash": "0x720bc02d220db318164dc3bade86eec1f3655bdc00fc1174de7d816a95c341f8",
+  "source": "https://sourcify.dev/server/v2/contract/11155111/0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a?fields=all",
+  "match": "exact_match",
+  "contract": "AquaRouter",
+  "compiler": "0.8.30+commit.73712a01",
+  "settings": {
+    "viaIR": true,
+    "metadata": {
+      "appendCBOR": true,
+      "bytecodeHash": "ipfs",
+      "useLiteralContent": false
+    },
+    "optimizer": {
+      "runs": 10000000,
+      "enabled": true
+    },
+    "evmVersion": "prague",
+    "remappings": [
+      "forge-std/=node_modules/forge-std/src/",
+      "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/",
+      "@1inch/solidity-utils/=node_modules/@1inch/solidity-utils/",
+      "hardhat-deploy/=node_modules/hardhat-deploy/",
+      "hardhat/=node_modules/hardhat/"
+    ]
+  },
+  "checkedAt": "2026-09-08T21:52:27.096Z",
+  "coreSources": [
+    {
+      "path": "src/Aqua.sol",
+      "sha256": "de94a67c58f7b8b9e95c03f6a9c2acbacf525b5f43f8255111a83a0f5156b68c",
+      "matchesPinnedSource": true
+    },
+    {
+      "path": "src/interfaces/IAqua.sol",
+      "sha256": "915cbe38c77b46c3927143693a1a1b8ca0f32f75dc34cd5c18526a8103e94fd9",
+      "matchesPinnedSource": true
+    },
+    {
+      "path": "src/libs/Balance.sol",
+      "sha256": "b0a33ae9b8864f874b2fac31d8197c2edd5fbb8022b77491c3243fc7949225ce",
+      "matchesPinnedSource": true
+    }
+  ]
+}
