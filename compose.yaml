@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:18.0
+    environment:
+      POSTGRES_USER: horizon
+      POSTGRES_PASSWORD: horizon_local_only
+      POSTGRES_DB: horizon
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - horizon-postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horizon -d horizon"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+volumes:
+  horizon-postgres:
