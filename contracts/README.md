@@ -1,6 +1,6 @@
 # Horizon contracts
 
-Phase 1 implements the market lifecycle and a fully backed fixed-price complementary match against pinned Aqua/SwapVM. Local verification on September 9, 2026: **33 tests pass**, including two fuzz properties with 256 cases each. No Horizon contract has been deployed publicly yet.
+Phase 1 implements the market lifecycle and a fully backed fixed-price complementary match against pinned Aqua/SwapVM. **Phase 2 adds curves, direct trades, and atomic four-fill routes, deployed and verified on Sepolia with live Graph indexing.** Local verification: **39 tests pass**, including three fuzz properties with 256 cases each. See [PHASE2.md](../PHASE2.md) for the current interfaces, rational integral, API, deployment addresses, and real two-fill transaction. The Phase 1 interfaces below remain available for compatibility.
 
 Run from the repository root:
 
@@ -19,9 +19,11 @@ Solidity is pinned to 0.8.30 with Cancun EVM, optimizer 700, and via-IR. Local v
 - `BinaryMarket`: one isolated USDC escrow per market, fixed question/rules/evidence source/close timestamp/resolver, permissionless fully backed pair minting, timestamp-based closing, one admin resolution, and claim redemption. Metadata has no setters. There is no collateral withdrawal or fee recipient.
 - `OutcomeToken`: six-decimal YES or NO bound to its immutable market. Only that escrow can mint or burn. Holders can transfer claims normally; redemption burns only the caller's tokens.
 - `HorizonSwapVM`: extends the pinned official Aqua router through the virtual opcode hook. Its application-local `0xf0` instruction implements a fixed-price maker BUY, checks the registry and exact tokens, and tracks filled shares. Vendor sources are unmodified. No fee opcode is enabled.
-- `ComplementaryExecutor`: combines a taker's USDC with the opposite buyer's Aqua contribution, mints a fully backed pair in an authenticated callback, and distributes both sides. It supports one resting order per transaction in Phase 1.
+- `ComplementaryExecutor`: Phase 1 single-order compatibility executor; not part of the live Phase 2 deployment.
+- `CurveMath`: exact cumulative rational integral for presets 1, 2, and 3, with explicit size/price bounds and BUY/SELL rounding.
+- `RouteExecutor`: live Phase 2 executor, supporting up to four direct/complementary curve fills with exact share size, expected fill state, maximum buy spend/minimum sale proceeds, deadlines, refunds, and complete rollback.
 
-The deploy order is registry (USDC, creation owner), router (Aqua, registry, rescue owner), executor (router). The router inherits upstream rescue authority over accidentally held router assets; it cannot withdraw market collateral. Set these addresses deliberately at deployment. Generated ABI artifacts are under `contracts/out/<File.sol>/<Contract>.json` after building.
+The deploy order is registry (USDC, creation owner), router (Aqua, registry, rescue owner), RouteExecutor (router). The router inherits upstream rescue authority over accidentally held router assets; it cannot withdraw market collateral. Generated ABI artifacts are under `contracts/out/<File.sol>/<Contract>.json` after building. The deployed addresses and source verification are recorded under `deployments/`.
 
 ## Publish and fill a fixed-price BUY
 
@@ -80,6 +82,6 @@ These tests use freely minted mock ERC-20 assets. They establish settlement orde
 
 ## Next contract work
 
-Phase 2 adds curve presets, explicit SELL strategies, bounded multiple fills, off-chain integer pricing/routing, shared-wallet accounting, and live Graph discovery. Preserve Phase 1's economic and authorization tests when changing strategy encoding. The full local suite now supplements the original protocol probe with lifecycle, wrong-market/token rejection, both complementary directions, donation isolation, cancellation, price/deadline limits, late-failure rollback, and collateral/rounding fuzz checks.
+Phase 2's curves, SELL strategies, bounded routes, integer quote service, shared-wallet accounting, and live Graph discovery are complete. Phase 3 should consume their existing interfaces for publication, trading, positions, creation, and admin resolution. Preserve the lifecycle, wrong-market/token rejection, both complementary directions, donation isolation, cancellation, price/deadline limits, late-failure rollback, and collateral/rounding tests.
 
-No deployed address is recorded yet. The address defaults in `.env.example` are candidates from official documentation. Verify Sepolia bytecode identity and deployment configuration before treating them as trusted integration targets.
+Sepolia deployment wiring and real transfers have been verified. The canonical Aqua address is the upstream AquaRouter wrapper, verified through Sourcify with exact matching core sources; its runtime differs from the locally compiled bare Aqua probe. See `deployments/aqua-verification.json` and `deployments/sepolia.json`.

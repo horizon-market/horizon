@@ -1,0 +1,15 @@
+{
+  "chainId": 11155111,
+  "owner": "0x243fBaeE0E81EfbC5900F0934f6f4Aa66a249D31",
+  "aqua": "0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a",
+  "usdc": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  "transactions": {
+    "MarketRegistry": "0x7bb78c175b6406d051977cb6b4e52bef40c1dbe080acf044d2b0e8b6cf4b9538",
+    "HorizonSwapVM": "0x5b11e74f86ded8717243adf51d1b11519c8a320951196c7937e50b1f5425275b",
+    "RouteExecutor": "0xc705bc81e11dd1df4a7e3d32b908b1cdf070819676468b3bd3df43e400a01138"
+  },
+  "registry": "0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1",
+  "startBlock": "11663746",
+  "router": "0xf155c2ad43d020b601ee51a7e086112a5d00240f",
+  "executor": "0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4"
+}

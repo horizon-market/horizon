@@ -44,3 +44,12 @@ jobs:
         with:
           version: v1.2.3
       - run: forge test --root contracts -vv
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:routes
+      - run: npm run subgraph:prepare
+      - run: npm run subgraph:codegen
+      - run: npm run subgraph:build

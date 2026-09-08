@@ -35,3 +35,11 @@ test('invalid curve directions and overflowing sizes fail before quoting', () =>
   assert.throws(() => cumulative({ ...curve, endPrice: 500000 }, 1n));
   assert.throws(() => cumulative({ ...curve, flags: 2 }, 1n));
 });
+test('prices near zero and one use representable aggregate fills instead of rejecting small chunks', () => {
+  for (const price of [1, 999999]) {
+    const c = candidate(1); c.strategy.startPrice = price; c.strategy.endPrice = price;
+    const result = allocate([c], 1_000_001n, true);
+    assert.equal(result.usdc, 1_000_001n - 1_000_001n * BigInt(price) / 1_000_000n);
+    assert.equal(result.fills.length, 1);
+  }
+});

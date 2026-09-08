@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { createServer as createSocketServer } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { createPublicClient, createWalletClient, http, erc20Abi, encodeAbiParameters, parseAbiParameters, keccak256, type Abi, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
@@ -10,8 +11,13 @@ import { cumulative, type Curve } from '../src/trading/math.js';
 import { QuoteService } from '../src/trading/service.js';
 
 test('real EVM: TypeScript arithmetic, indexed discovery, simulation, two fills, and stale rejection', { timeout: 90_000 }, async () => {
-  const port = 18547;
+  const reservation = createSocketServer();
+  await new Promise<void>(resolve => reservation.listen(0, '127.0.0.1', resolve));
+  const port = (reservation.address() as { port: number }).port;
+  await new Promise<void>(resolve => reservation.close(() => resolve()));
   const anvil = spawn('anvil', ['--port', String(port), '--chain-id', '11155111', '--silent'], { stdio: 'ignore' });
+  let startupError: Error | undefined;
+  anvil.on('error', error => { startupError = error; });
   const rpc = `http://127.0.0.1:${port}`;
   const client = createPublicClient({ chain: sepolia, transport: http(rpc, { retryCount: 0 }) });
   const wallet = createWalletClient({ chain: sepolia, transport: http(rpc) });
@@ -19,7 +25,8 @@ test('real EVM: TypeScript arithmetic, indexed discovery, simulation, two fills,
   try {
     let ready = false;
     for (let i = 0; i < 50; i++) {
-      if (anvil.exitCode !== null) throw new Error('Anvil exited; ensure port 18547 is free');
+      if (startupError) throw new Error('Anvil could not start; install Foundry and add its bin directory to PATH');
+      if (anvil.exitCode !== null) throw new Error('Anvil exited during startup');
       try { await client.getChainId(); ready = true; break; } catch { await new Promise(r => setTimeout(r, 100)); }
     }
     assert.ok(ready);
@@ -43,6 +50,13 @@ test('real EVM: TypeScript arithmetic, indexed discovery, simulation, two fills,
     await write(owner, registry, registryAbi, 'createMarket', [id, 'Local integration?', 'Test rules', 'Test evidence', Number(block.timestamp + 86400n), owner]);
     const market = await client.readContract({ address: registry, abi: registryAbi, functionName: 'marketByCreationId', args: [id] });
     const no = await client.readContract({ address: market, abi: marketAbi, functionName: 'noToken' });
+    for (const buy of [true, false]) for (const shape of [1, 2, 3]) {
+      const s: Curve = { market, flags: shape * 4 + (buy ? 2 : 0), startPrice: buy ? 999999 : 1,
+        endPrice: buy ? 1 : 999999, maxShares: 10n ** 15n, salt: keccak256('0x00') };
+      for (const q of [0n, 1n, 12345n, s.maxShares / 2n, s.maxShares - 1n, s.maxShares]) {
+        assert.equal(await client.readContract({ address: router, abi: routerAbi, functionName: 'curveCumulative', args: [s, q] }), cumulative(s, q));
+      }
+    }
     for (const account of [maker, taker]) await write(owner, usdc, tokenArtifact.abi, 'mint', [account, 10_000_000n]);
     await write(maker, usdc, erc20Abi, 'approve', [aqua, 10_000_000n]);
     await write(taker, usdc, erc20Abi, 'approve', [executor, 10_000_000n]);

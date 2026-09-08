@@ -13,13 +13,13 @@ Read this roadmap and [PROJECT_BRIEF.md](/Users/xana/work/ethglobal2026/horizon/
 - Build capacity: **one human builder with AI assistance**.
 - Original time budget: **four days**, stated on September 8, 2026. Reassess remaining time when continuing; a new task does not restart the clock.
 - Required integrations: **1inch Aqua/SwapVM, The Graph, Hedera x402, and World**. All four are required, not optional stretch goals.
-- Current status, September 9, 2026: **Phase 1 contract exit verified locally**. A registry, isolated USDC escrows, market-specific YES/NO tokens, immutable rules/resolvers, fixed-price Aqua/SwapVM buying strategies, and authenticated complementary minting work. The 0.60 + 0.40 USDC match and subsequent redemption pass against the pinned protocols. The TypeScript/admin/ORM/worker foundation remains available.
-- Next milestone: **Phase 2 curves, bounded routing, and live Graph indexing**. Horizon has not yet been deployed to Sepolia. Credentials are now populated locally; actual Graph deployment, World proof verification, and Hedera payments remain unproven.
+- Current status, September 9, 2026: **Phase 2 exit verified live on Sepolia and The Graph**. Curve presets, direct/complementary trades, atomic four-fill execution, a shared-wallet-aware quote service, and a deployed Subgraph work. A live Graph-backed two-fill trade minted 2 YES backed by 2 USDC; stale-route and depleted-wallet checks passed. See [PHASE2.md](PHASE2.md) for contracts, API usage, arithmetic, and transaction evidence.
+- Next milestone: **Phase 3 creation service and React application**, including Graph-grounded AI, browser/agent Hedera x402 payments, World verification/discounts, and admin resolution. These live payment/identity flows remain unproven; credentials are populated locally.
 - Setup, test evidence, current limitations, and pending access: [OPERATIONS.md](OPERATIONS.md). Protocol source provenance: [contracts/README.md](contracts/README.md).
 
 Useful continuation prompt:
 
-> Read /Users/xana/work/ethglobal2026/horizon/README.md, PROJECT_BRIEF.md, OPERATIONS.md, and contracts/README.md. Continue Horizon from this context rather than restarting product discovery. Phase 1's backed complementary match and market lifecycle pass locally; the TypeScript/admin/ORM/worker stack is also available. Continue with Phase 2 curves, bounded routing, and live Graph indexing. Preserve zero trading fees, USDC-only sharing, market-specific outcomes, and explicit resale authorization. Credentials exist locally, but Horizon deployment and live sponsor flows remain pending. Keep these documents updated with evidence and never print secrets.
+> Read /Users/xana/work/ethglobal2026/horizon/README.md, PROJECT_BRIEF.md, OPERATIONS.md, PHASE2.md, and contracts/README.md. Continue Horizon from this context rather than restarting product discovery. Phase 2 is live on Sepolia with a deployed Subgraph, exact integer curve math, atomic routes, and a Graph-backed quote API. Continue Phase 3: React trading/creation UI, Graph-grounded AI, browser and agent Hedera x402 payments, World verification/discounts, and admin resolution. Preserve zero trading fees, USDC-only sharing, market-specific outcomes, and explicit resale authorization. Read deployments/*.json for public transaction evidence and check existing local credentials without printing them.
 
 ## Confirmed product choices
 
@@ -61,9 +61,9 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 
 - [x] Establish the Horizon repository and record dependency/source provenance with normal incremental commits.
 - [x] Pin compatible official Aqua/SwapVM sources and test a custom opcode extension with actual local token transfers and output-first callbacks.
-- [ ] Verify the chosen deployed Aqua registry and the eventual Horizon router on Sepolia.
+- [x] Verify the chosen deployed Aqua registry and the eventual Horizon router on Sepolia (Sourcify exact runtime/core-source match; Horizon deployment wiring and live transfers verified).
 - [x] Establish trading-network RPC access, gas, and test USDC (read-only doctor checks confirmed Sepolia and positive deployer balances; no deployment gas estimate yet).
-- [ ] Confirm Graph Studio access and deploy a minimal live indexing path as soon as there are relevant events.
+- [x] Confirm Graph Studio access and deploy a live indexing path for market/strategy/fill/collateral/resolution events.
 - [ ] Check the World developer app and request Selfie Check/Sandbox access if necessary.
 - [ ] Prove a small Blocky402-settled Hedera payment from an agent and from a browser wallet.
 - [x] Record the user's TypeScript backend selection.
@@ -88,15 +88,17 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 
 ### Phase 2 — Curves, routing, and live indexing: Day 2
 
-- [ ] Implement the planned curve presets, partial-fill accounting, size/budget limits, and cancellation.
-- [ ] Add direct outcome trades and complementary minting as alternative buy-route legs.
-- [ ] Add a bounded multi-fill executor and off-chain allocator; the proposed initial cap is four fills per route.
-- [ ] Account jointly for curves backed by the same maker wallet and token.
-- [ ] Deploy the live Subgraph and implement candidate discovery, bounded RPC refresh, and complete-route simulation.
-- [ ] Expose quote results with amounts, chosen fills, snapshot information, limits, deadline, and calldata.
-- [ ] Demonstrate USDC shared across two markets, with a fill reducing remaining executable capacity elsewhere.
+- [x] Implement curve presets 1/2/3, partial-fill accounting, size/budget limits, and cancellation.
+- [x] Add direct outcome trades and complementary minting as alternative buy-route legs.
+- [x] Add a bounded multi-fill executor and off-chain allocator with a four-fill cap.
+- [x] Account jointly for curves backed by the same maker wallet and token.
+- [x] Deploy the live Subgraph and implement candidate discovery, bounded RPC refresh, and complete-route simulation.
+- [x] Expose quote results with amounts, chosen fills, snapshot information, limits, deadline, and calldata.
+- [x] Demonstrate USDC shared across two markets, with a fill reducing remaining executable capacity elsewhere.
 
 **Exit:** a live quote fills at least two curves atomically; stale state, exhausted balances, and slippage produce safe rejection/requoting.
+
+**Evidence:** [live two-fill transaction](https://sepolia.etherscan.io/tx/0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba), [Graph-indexed result](deployments/phase2-indexed.json), and [complete handoff](PHASE2.md). Local checks: 39 Foundry tests, 8 TypeScript unit tests, 3 PostgreSQL integration tests, and an Anvil end-to-end test with 44 contract/TypeScript pricing comparisons. The allocator is a bounded search, not a global-optimality guarantee. Unfunded or unapproved requests explicitly remain unsimulated until ready.
 
 ### Phase 3 — Creation service and application: Day 3
 

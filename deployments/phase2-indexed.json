@@ -1,0 +1,52 @@
+{
+  "verifiedAt": "2026-09-08T22:03:11.546Z",
+  "routes": [
+    {
+      "id": "0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557abaaa0c0000",
+      "market": {
+        "id": "0xbc7c4cc7e0f944053bfa0607592ef4cf215c758e",
+        "collateral": "2000000"
+      },
+      "taker": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+      "recipient": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+      "shares": "2000000",
+      "usdc": "1183334",
+      "fills": "2",
+      "block": "11663775",
+      "transaction": "0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba"
+    }
+  ],
+  "fills": [
+    {
+      "id": "0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba860c0000",
+      "strategy": {
+        "id": "0x1304ce742bc6b47143a9de279b6fd6eb0e3d223b769ba3ca420964d187497aa9",
+        "filled": "1000000",
+        "active": false
+      },
+      "shares": "1000000",
+      "usdc": "416666",
+      "block": "11663775",
+      "transaction": "0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba"
+    },
+    {
+      "id": "0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba970c0000",
+      "strategy": {
+        "id": "0x779d808a2fdcfa0c63092ea83435186292a15773f38df821ca246be71dffb2dd",
+        "filled": "1000000",
+        "active": false
+      },
+      "shares": "1000000",
+      "usdc": "400000",
+      "block": "11663775",
+      "transaction": "0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba"
+    }
+  ],
+  "_meta": {
+    "block": {
+      "number": 11663786,
+      "hash": "0x8cae6d1210faae6aa29f2e3a1783ce9221559a8e9f0055210f718b9dda2977c5"
+    },
+    "hasIndexingErrors": false
+  }
+}

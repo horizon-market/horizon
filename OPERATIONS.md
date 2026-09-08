@@ -1,6 +1,6 @@
 # Horizon foundation — setup and continuation
 
-Implementation snapshot: September 9, 2026. The Phase 0 local foundation and Phase 1 contract exit work. Credentials have since been populated locally, but public contract deployment and live sponsor flows remain pending.
+Implementation snapshot: September 9, 2026. **Phase 2 is implemented and verified live** on Sepolia and Graph Studio. [PHASE2.md](PHASE2.md) contains the deployed addresses, two-fill transaction, live indexing proof, API format, math, and remaining work. Hedera payments, World verification, React, and AI creation remain Phase 3 work.
 
 Local Git history preserves the work in increments: `209555f` records the planning baseline, `196ca79` pins official contract sources and the settlement probe, and `d13a8c4` adds the tested TypeScript/admin/ORM/worker foundation. No remote repository or public deployment has been created.
 
@@ -98,7 +98,7 @@ npm run test:integration
 
 For a pre-existing Docker volume created before the initialization SQL was added, create the missing test database once with `docker compose exec db createdb -U horizon horizon_test`, then apply its migration. Initialization scripts do not rerun against an existing volume.
 
-Verified locally: TypeScript typecheck/build; two unit tests; three actual PostgreSQL integration tests covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry. Phase 1 adds market lifecycle and fully backed complementary execution: 33 Foundry tests pass, including two fuzz properties with 256 cases each. The 329 vendor file hashes remain unchanged. Prisma migration diff against the live test schema reported no difference. The browser login page rendered successfully. The GitHub workflow runs the local checks after push, but remote CI has not run yet.
+Verified locally: TypeScript typecheck/build; **8 unit tests**; **3 PostgreSQL integration tests** covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry; **39 Foundry tests** including three 256-case fuzz properties; and **1 isolated Anvil integration test** with 44 contract/TypeScript pricing comparisons, whole-route simulation and execution, exhaustion, and reorg checks. The Subgraph builds and is live; a real Graph-backed route executed two Sepolia fills, and Graph indexed the resulting collateral and exhausted curves. The 329 vendor file hashes remain unchanged. Remote CI is configured but has not run.
 
 ### Run the Phase 1 contract demo
 
@@ -109,7 +109,7 @@ npm run contracts:demo
 npm run contracts:test
 ```
 
-The demo prints a local EVM trace of Aqua authorization, a 0.60/0.40 match, fully backed minting, resolution, and redemption. It requires no Docker, API, private keys, or RPC. This is a contract demonstration; the trading UI is Phase 3 work. `npm run contracts:build` writes ABIs/artifacts to ignored `contracts/out/`. See `contracts/README.md` for the Phase 2 integration handoff.
+The demo prints a local EVM trace of Aqua authorization, a 0.60/0.40 match, fully backed minting, resolution, and redemption. It requires no Docker, API, private keys, or RPC. This is a contract demonstration; the trading UI is Phase 3 work. `npm run contracts:build` writes ABIs/artifacts to ignored `contracts/out/`. Phase 2 adds `npm run test:routes` for the local EVM/quote integration, `/api/markets` and `/api/quotes` on the API, and read-only `npm run demo:indexed` for live Graph evidence. [PHASE2.md](PHASE2.md) is the current handoff.
 
 The macOS sandbox prevented PostgreSQL shared-memory initialization and caused Foundry's OS proxy lookup to crash; those commands succeeded outside the sandbox. These were environment limitations, not passing results inferred from failed tests.
 
@@ -123,9 +123,9 @@ This read-only command reports `ok`, `pending`, or `failed` without printing sec
 
 On September 8 the public Blocky402 `/supported` endpoint advertised `exact`, `hedera:testnet`, x402 version 2. This establishes advertised capability only. Remaining work:
 
-- The latest doctor checks confirmed the Sepolia chain ID, code at the configured Aqua/USDC addresses, six-decimal USDC, and positive deployer ETH/test USDC balances. Official Aqua bytecode identity and Horizon deployment still need verification.
+- Sepolia contracts are deployed and wired correctly. Official AquaRouter has an exact Sourcify runtime match and core sources matching our pins. A real two-fill route, fully backed minting, shared-wallet depletion, and stale-route rejection are recorded under `deployments/`.
 - Hedera receiver/payer credentials and WalletConnect configuration are populated; prove funding and real browser/agent paid requests through Blocky402.
-- `GRAPH_SUBGRAPH_SLUG`, `GRAPH_DEPLOY_KEY`, and `GRAPH_API_KEY` are populated locally. Verify Studio access through deployment, then set `GRAPH_QUERY_URL` to the resulting endpoint. Horizon now emits the relevant local events.
+- Graph Studio deployment and live queries are verified. `GRAPH_QUERY_URL` and the three `HORIZON_*_ADDRESS` values are now populated locally. A live query shows the completed route, both fills, correct collateral, and inactive exhausted strategies. Graph-grounded AI remains Phase 3 work.
 - World app/RP/action configuration is populated. `WORLD_SELFIE_ACCESS` remains `unknown`; Selfie Check/Sandbox access and a real credential verification still need proof.
 
 Use `.env.example` for configuration names. Do not send private keys in task messages. Public deployed addresses, endpoints without secrets, and transaction hashes can be added to documentation after verification. All four sponsors remain required.
@@ -138,6 +138,8 @@ The install audit on September 8 reported **46 findings: 42 moderate and 4 high,
 
 Relevant advisories: [TinyMCE media injection](https://github.com/advisories/GHSA-vg35-5wq7-3x7w), [deepmerge-ts recursive graphs](https://github.com/advisories/GHSA-ggr8-5vv4-36mx). Re-run the audit before deployment; counts are a dated snapshot.
 
+Phase 2 pins `viem@2.56.3`, `@graphprotocol/graph-cli@0.98.1`, and `@graphprotocol/graph-ts@0.38.2`. With Graph's **development-only CLI**, the local audit reports 61 total findings (46 moderate, 14 high, 1 critical). The critical finding is the CLI's `decompress` archive extraction dependency, used by its local-node download helper; Horizon uses codegen/build/Studio deploy and does not call that helper. Keep Graph CLI tooling out of production installs (`npm ci --omit=dev`) and do not use its vulnerable archive downloader. Its older suggested CLI downgrade also brings an older dependency tree, so it was not applied blindly. This scope assessment does not remove the advisory; dependency remediation remains pre-public-release work. No public API/admin hosting has been performed.
+
 ## Continue from here
 
-Read `README.md`, `PROJECT_BRIEF.md`, and `contracts/README.md`, then continue with **Phase 2: curves, bounded routing, and live indexing**. Phase 1's fixed-price BUY opcode, complementary executor, market lifecycle, and local tests are implemented. Use their canonical order encoding and units; extend them deliberately for sell strategies and multiple fills. Confirm official Aqua deployment identity before broadcasting Horizon contracts and publishing the Subgraph. Keep zero trading fees, manual resale, USDC-only sharing across markets, and market-bound outcome validation. Credentials are local; do not reopen the TypeScript stack decision or ask for values already present.
+Read `README.md`, `PROJECT_BRIEF.md`, `PHASE2.md`, and `contracts/README.md`, then continue with **Phase 3: creation service and React application**. The deployed registry/router/executor and Subgraph are available; do not redeploy them merely to restart context. Keep zero trading fees, manual resale, USDC-only sharing, market-bound outcomes, and all four required sponsors. Credentials are local; do not reopen the TypeScript stack decision or ask for values already present. World Selfie Check access remains unknown, and both browser/agent Hedera payment paths still need real proof.

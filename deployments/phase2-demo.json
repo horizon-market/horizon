@@ -1,0 +1,58 @@
+{
+  "maker": "0x2Ab4de9187b800c1b48865E83745e593AF9fA7A0",
+  "taker": "0x243fBaeE0E81EfbC5900F0934f6f4Aa66a249D31",
+  "markets": [
+    "0xBC7C4cc7e0f944053bFa0607592ef4cf215C758e",
+    "0xEB4C62f9371DC33cb70e36753f8D796cC2efb62f"
+  ],
+  "strategies": [
+    {
+      "market": "0xBC7C4cc7e0f944053bFa0607592ef4cf215C758e",
+      "id": "0x779d808a2fdcfa0c63092ea83435186292a15773f38df821ca246be71dffb2dd",
+      "strategy": {
+        "market": "0xBC7C4cc7e0f944053bFa0607592ef4cf215C758e",
+        "flags": 6,
+        "startPrice": 450000,
+        "endPrice": 350000,
+        "maxShares": "1000000",
+        "salt": "0xff7d8b78ae0b6f0395615737ce63b0c310aca722cde5272394a0eacf6fced8b3"
+      }
+    },
+    {
+      "market": "0xBC7C4cc7e0f944053bFa0607592ef4cf215C758e",
+      "id": "0x1304ce742bc6b47143a9de279b6fd6eb0e3d223b769ba3ca420964d187497aa9",
+      "strategy": {
+        "market": "0xBC7C4cc7e0f944053bFa0607592ef4cf215C758e",
+        "flags": 10,
+        "startPrice": 450000,
+        "endPrice": 350000,
+        "maxShares": "1000000",
+        "salt": "0x4ea593129bbe033af6d71e00ca52e4d383816fc1d1a656fa8a431f7ef4acf9be"
+      }
+    },
+    {
+      "market": "0xEB4C62f9371DC33cb70e36753f8D796cC2efb62f",
+      "id": "0x28280d3ff2f94995df3c00be9c52872d67d23031bd1464b85e490729bc85c0cd",
+      "strategy": {
+        "market": "0xEB4C62f9371DC33cb70e36753f8D796cC2efb62f",
+        "flags": 6,
+        "startPrice": 400000,
+        "endPrice": 400000,
+        "maxShares": "1000000",
+        "salt": "0x09c707d768de34d1ae68b0d0b3b3da41b1ff024e5d4c4deb1107f07118614fe5"
+      }
+    }
+  ],
+  "transactions": {
+    "makerGas": "0x466599f1db05615c8b8864b7363a626611abe26a7bd4dd132c45507e8263e7c2",
+    "makerUSDC": "0x01129de0b4cf1f1a49b65b2e10d69a3e7939fbe0e0730a3696dfe9926b49d60d",
+    "makerApproval": "0x92e280d8b10d47755f88b4065afbc4baac2eee07b4b6fa2eea0f2d7a1b6226a2",
+    "takerApproval": "0xa8bed0a01d83dca9b2920685a032c0bd7cec1c0892d1da582df95e76562fee51",
+    "market0": "0x9722915ccccccb7bde00dfbfa9e3a3e1d4fd7c4a10e9075faa1c0163f247509d",
+    "curve0-0": "0x81737bcb48b1ce2b76288f9cabac6740ffe168cd9dd211fe569188fe4da07b16",
+    "curve0-1": "0xaa3f25e70a31b22ac3562006b8c9464c8b7339715eab6854beff12cf749c6217",
+    "market1": "0xc4a05954e58ade57bb73ea84f3805c4bccda91d18e6a209f95361d758c24525c",
+    "curve1-0": "0xfdc8aa47060e4c22b832ca145cda0aa3e4c1d0efee098451c4a5773081aa7146"
+  },
+  "seeded": true
+}

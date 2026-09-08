@@ -2,7 +2,7 @@
 
 Planning snapshot: **September 8, 2026**. Event: **ETHOnline 2026**. Team: **one human builder with AI assistance**. Original delivery window: **four days**.
 
-This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Update September 9: Phase 1's fixed-price complementary match, collateralized market lifecycle, and redemption now pass locally against pinned Aqua/SwapVM sources. Variable curves, route aggregation, the trading frontend, and live sponsor flows remain planned. Contract interfaces and limits are in [contracts/README.md](contracts/README.md).
+This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Update September 9: **Phase 2 is implemented and verified live**: curve presets, direct/complementary routes, shared-wallet-aware quoting, Sepolia contracts, and a live Subgraph. [PHASE2.md](PHASE2.md) records interfaces, arithmetic, API usage, transaction evidence, and scope limits. React, AI-assisted creation, live Hedera payments, and World verification remain Phase 3 work.
 
 ## 1. Product thesis
 
@@ -74,7 +74,7 @@ After trading closes, the disclosed admin submits the result and evidence. YES o
 
 ## 4. Curves and execution design
 
-The agreed feature is start/end prices, a size or budget, and a small set of shapes. The following specific kernel is the **proposed implementation default**, not an already validated mathematical implementation:
+The agreed feature is start/end prices, a size or budget, and a small set of shapes. Phase 2 implements and tests this kernel with presets 1, 2, and 3:
 
 `p(x) = p_start + (p_end - p_start) * x^alpha`, with `x = filled_shares / total_shares` and `alpha` in `{1, 2, 3}`.
 
@@ -84,7 +84,7 @@ For total size Q and fill coordinate q, the real-number cumulative cost is:
 
 `C(q) = p_start*q + (p_end-p_start)*q^(alpha+1) / ((alpha+1)*Q^alpha)`.
 
-This equation is explanatory. Specify normalized units, integer arithmetic, rounding, overflow limits, and dust behavior before using it in contracts. Buy budget B should bound the total cumulative spend; derive a conservative Q from B and the full-curve average price. Do not use floating-point money calculations in executable quotes.
+`CurveMath` and the TypeScript quote service implement the exact rational cumulative integral: BUY rounds down, SELL rounds up, and fill amounts are cumulative differences. Price and quantity units have six decimals, with size capped at `1e15` base units to bound intermediates. The Anvil integration test compares 44 actual contract outputs with TypeScript calculations across shapes, directions, and boundaries. Aqua allocation bounds the maker's spending/inventory; the frontend must relate its budget control to a supported size. Executable quoting uses bigint throughout. Details and tiny-fill behavior are in PHASE2.md.
 
 Each strategy binds maker, market, outcome token, direction, price endpoints, shape, quantity/budget, and a unique identifier. Filled quantity is persistent and must not reset on each execution. Cancellation disables future fills; changing terms uses cancellation and republication.
 
@@ -106,7 +106,7 @@ The current `HorizonSwapVM.BuyStrategy` binds market, YES/NO side, fixed price, 
 
 A buy route can mix the first two types because they deliver the same outcome. Routes stay within one market. Complementary sell-and-merge routes, cross-market paths, and automatic matching are deferred.
 
-The proposed initial route cap is four fills. An off-chain deterministic allocator compares marginal prices, respects quantities and shared maker budgets, refreshes live state, and simulates the entire selected transaction. It should describe the result as the best route found within its search limits, not an unconditional global optimum.
+The implemented route cap is four fills. The deterministic allocator performs a bounded chunk search over up to 32 Graph-discovered candidates, respects quantities and shared maker budgets, refreshes live state at one block, and simulates the entire selected transaction when the account is funded and approved. It provides exact amounts for the selected route, not an unconditional global optimum; its bounds and conservative treatment of incoming proceeds may exclude other executable routes.
 
 The executor checks market/outcome identity, authorized strategies, current fill state, funding, user limits, deadline, and callback context. It executes legs in a defined order, refunds unused user input, and fully reverts if any leg fails. The solver proposes a route; it cannot override contract constraints.
 

@@ -23,17 +23,25 @@ export function allocate(candidates: Candidate[], shares: bigint, buying: boolea
       const already = amounts.get(c.id) ?? 0n;
       const capacity = min(c.strategy.maxShares - c.filled - already, remaining);
       const funds = min(wallet.get(key(c)) ?? 0n, budget.get(c.id) ?? 0n);
-      if (capacity <= 0n || funds <= 0n) continue;
-      let q = min(capacity, chunk);
+      if (capacity <= 0n || (!isBuy(c.strategy) && funds <= 0n)) continue;
       const outputFor = (n: bigint) => isBuy(c.strategy) ? curveCost(c.strategy, c.filled + already, n) : n;
-      if (outputFor(q) > funds) {
-        let lo = 0n, hi = q;
+      const fundedSize = (size: bigint) => {
+        if (outputFor(size) <= funds) return size;
+        let lo = 0n, hi = size;
         while (lo < hi) { const mid = (lo + hi + 1n) / 2n; if (outputFor(mid) <= funds) lo = mid; else hi = mid - 1n; }
-        q = lo;
-      }
+        return lo;
+      };
+      let q = fundedSize(min(capacity, chunk));
+      const validAggregate = (size: bigint) => {
+        const total = curveCost(c.strategy, c.filled, already + size);
+        return total > 0n && total < already + size;
+      };
+      // Near 0/1 prices may need a larger share quantity for both contributions to be representable.
+      // Chunks aggregate into ONE on-chain leg, so a later zero-cost increment is valid if the full leg is valid.
+      if (!validAggregate(q)) q = fundedSize(capacity);
       if (q === 0n) continue;
       const makerCost = curveCost(c.strategy, c.filled + already, q);
-      if (makerCost <= 0n || makerCost >= q) continue;
+      if (!validAggregate(q)) continue;
       const cost = buying && isBuy(c.strategy) ? q - makerCost : makerCost;
       if (!best || (buying ? cost * best.q < best.cost * q : cost * best.q > best.cost * q)) best = { c, q, cost, out: outputFor(q) };
     }
