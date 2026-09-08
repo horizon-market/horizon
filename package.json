@@ -28,7 +28,8 @@
     "test:integration": "node --env-file-if-exists=.env --import tsx --test --test-concurrency=1 test/integration.test.ts",
     "vendor:verify": "node --import tsx scripts/verify-vendor.ts",
     "contracts:build": "forge build --root contracts",
-    "contracts:test": "forge test --root contracts -vv"
+    "contracts:test": "forge test --root contracts -vv",
+    "contracts:demo": "forge test --root contracts --match-test testSixtyFortyBackedMatchAndWinnerRedemption -vvvv"
   },
   "dependencies": {
     "@adminjs/express": "6.1.1",

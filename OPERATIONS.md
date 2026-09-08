@@ -1,6 +1,6 @@
 # Horizon foundation — setup and continuation
 
-Implementation snapshot: September 8, 2026. Phase 0's local foundation works. Its live-integration exit criteria remain open; the user will provide accounts and API access later.
+Implementation snapshot: September 9, 2026. The Phase 0 local foundation and Phase 1 contract exit work. Credentials have since been populated locally, but public contract deployment and live sponsor flows remain pending.
 
 Local Git history preserves the work in increments: `209555f` records the planning baseline, `196ca79` pins official contract sources and the settlement probe, and `d13a8c4` adds the tested TypeScript/admin/ORM/worker foundation. No remote repository or public deployment has been created.
 
@@ -98,7 +98,18 @@ npm run test:integration
 
 For a pre-existing Docker volume created before the initialization SQL was added, create the missing test database once with `docker compose exec db createdb -U horizon horizon_test`, then apply its migration. Initialization scripts do not rerun against an existing volume.
 
-Verified locally: TypeScript typecheck/build; two unit tests; three actual PostgreSQL integration tests covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry; three Foundry tests covering official-source token transfers, callback ordering, and shared-wallet depletion. Prisma migration diff against the live test schema reported no difference. The browser login page rendered successfully. The GitHub workflow runs the local checks after push, but remote CI has not run yet.
+Verified locally: TypeScript typecheck/build; two unit tests; three actual PostgreSQL integration tests covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry. Phase 1 adds market lifecycle and fully backed complementary execution: 33 Foundry tests pass, including two fuzz properties with 256 cases each. The 329 vendor file hashes remain unchanged. Prisma migration diff against the live test schema reported no difference. The browser login page rendered successfully. The GitHub workflow runs the local checks after push, but remote CI has not run yet.
+
+### Run the Phase 1 contract demo
+
+From the Horizon root, with Foundry 1.2.3 installed:
+
+```sh
+npm run contracts:demo
+npm run contracts:test
+```
+
+The demo prints a local EVM trace of Aqua authorization, a 0.60/0.40 match, fully backed minting, resolution, and redemption. It requires no Docker, API, private keys, or RPC. This is a contract demonstration; the trading UI is Phase 3 work. `npm run contracts:build` writes ABIs/artifacts to ignored `contracts/out/`. See `contracts/README.md` for the Phase 2 integration handoff.
 
 The macOS sandbox prevented PostgreSQL shared-memory initialization and caused Foundry's OS proxy lookup to crash; those commands succeeded outside the sandbox. These were environment limitations, not passing results inferred from failed tests.
 
@@ -112,10 +123,10 @@ This read-only command reports `ok`, `pending`, or `failed` without printing sec
 
 On September 8 the public Blocky402 `/supported` endpoint advertised `exact`, `hedera:testnet`, x402 version 2. This establishes advertised capability only. Remaining work:
 
-- Sepolia RPC, funded deployment wallet/test USDC, official Aqua bytecode verification, and Horizon deployment.
-- Hedera receiver/payer accounts, a funded agent wallet, WalletConnect project, and real browser and agent paid requests through Blocky402.
-- Graph Studio/deploy access and a deployed Subgraph once Horizon emits relevant events.
-- World app/action configuration, Selfie Check/Sandbox access, and real credential verification. Access status remains unknown.
+- The latest doctor checks confirmed the Sepolia chain ID, code at the configured Aqua/USDC addresses, six-decimal USDC, and positive deployer ETH/test USDC balances. Official Aqua bytecode identity and Horizon deployment still need verification.
+- Hedera receiver/payer credentials and WalletConnect configuration are populated; prove funding and real browser/agent paid requests through Blocky402.
+- `GRAPH_SUBGRAPH_SLUG`, `GRAPH_DEPLOY_KEY`, and `GRAPH_API_KEY` are populated locally. Verify Studio access through deployment, then set `GRAPH_QUERY_URL` to the resulting endpoint. Horizon now emits the relevant local events.
+- World app/RP/action configuration is populated. `WORLD_SELFIE_ACCESS` remains `unknown`; Selfie Check/Sandbox access and a real credential verification still need proof.
 
 Use `.env.example` for configuration names. Do not send private keys in task messages. Public deployed addresses, endpoints without secrets, and transaction hashes can be added to documentation after verification. All four sponsors remain required.
 
@@ -129,4 +140,4 @@ Relevant advisories: [TinyMCE media injection](https://github.com/advisories/GHS
 
 ## Continue from here
 
-Read `README.md` and `PROJECT_BRIEF.md`, then implement **Phase 1: market lifecycle and the first backed complementary match**. The local protocol probe and its boundaries are described in `contracts/README.md`. Keep zero trading fees, manual resale, USDC-only sharing across markets, and market-bound outcome validation. Live sponsor access can be added when the user supplies it without reopening the TypeScript stack decision.
+Read `README.md`, `PROJECT_BRIEF.md`, and `contracts/README.md`, then continue with **Phase 2: curves, bounded routing, and live indexing**. Phase 1's fixed-price BUY opcode, complementary executor, market lifecycle, and local tests are implemented. Use their canonical order encoding and units; extend them deliberately for sell strategies and multiple fills. Confirm official Aqua deployment identity before broadcasting Horizon contracts and publishing the Subgraph. Keep zero trading fees, manual resale, USDC-only sharing across markets, and market-bound outcome validation. Credentials are local; do not reopen the TypeScript stack decision or ask for values already present.

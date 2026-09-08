@@ -1,6 +1,6 @@
-# Protocol foundation
+# Horizon contracts
 
-Phase 0 compiles official Aqua and SwapVM and runs a small local transfer probe. It does **not** implement a market registry, collateral escrow, backed outcome tokens, prediction curves, or a production router.
+Phase 1 implements the market lifecycle and a fully backed fixed-price complementary match against pinned Aqua/SwapVM. Local verification on September 9, 2026: **33 tests pass**, including two fuzz properties with 256 cases each. No Horizon contract has been deployed publicly yet.
 
 Run from the repository root:
 
@@ -8,9 +8,52 @@ Run from the repository root:
 npm run vendor:verify
 npm run contracts:build
 npm run contracts:test
+npm run contracts:demo
 ```
 
 Solidity is pinned to 0.8.30 with Cancun EVM, optimizer 700, and via-IR. Local verification used Foundry 1.2.3. Cancun support matters because SwapVM uses transient storage.
+
+## Implemented contracts
+
+- `MarketRegistry`: the creation-service owner creates markets with unique creation IDs. Its two-step owner transfer changes future creation authority, never an existing market's rules or resolver. Anyone will be able to request market creation through the service; the current factory call itself is authorized.
+- `BinaryMarket`: one isolated USDC escrow per market, fixed question/rules/evidence source/close timestamp/resolver, permissionless fully backed pair minting, timestamp-based closing, one admin resolution, and claim redemption. Metadata has no setters. There is no collateral withdrawal or fee recipient.
+- `OutcomeToken`: six-decimal YES or NO bound to its immutable market. Only that escrow can mint or burn. Holders can transfer claims normally; redemption burns only the caller's tokens.
+- `HorizonSwapVM`: extends the pinned official Aqua router through the virtual opcode hook. Its application-local `0xf0` instruction implements a fixed-price maker BUY, checks the registry and exact tokens, and tracks filled shares. Vendor sources are unmodified. No fee opcode is enabled.
+- `ComplementaryExecutor`: combines a taker's USDC with the opposite buyer's Aqua contribution, mints a fully backed pair in an authenticated callback, and distributes both sides. It supports one resting order per transaction in Phase 1.
+
+The deploy order is registry (USDC, creation owner), router (Aqua, registry, rescue owner), executor (router). The router inherits upstream rescue authority over accidentally held router assets; it cannot withdraw market collateral. Set these addresses deliberately at deployment. Generated ABI artifacts are under `contracts/out/<File.sol>/<Contract>.json` after building.
+
+## Publish and fill a fixed-price BUY
+
+1. The registry owner calls `createMarket(creationId, question, rules, evidenceSource, closeAt, resolver)` before the deadline. All text fields must be nonempty. The service remains responsible for meaningful, resolvable questions.
+2. Build `BuyStrategy({market, buyYes, price, maxShares, salt})`. `price` is micro-USDC per whole outcome, strictly between 0 and 1,000,000. `maxShares` is a `uint128` count of outcome base units. Both outcomes and USDC have six decimals.
+3. Call `router.buildBuyOrder(maker, strategy)`. The maker approves USDC to **Aqua**, then calls `Aqua.ship(router, abi.encode(order), [outcome, USDC], [0, budget])`. For a fully funded allocation, `budget = floor(maxShares * price / 1e6)`. The zero outcome allocation is intentional: a buyer starts without outcome inventory. Aqua requires both tokens to be registered in the strategy even when one allocation is zero. Each publication needs a unique salt if all other terms match an earlier order.
+4. The taker approves USDC to **ComplementaryExecutor** and calls `execute(maker, strategy, shares, maxTakerUSDC, recipient, deadline)`. The taker receives the opposite side from `strategy.buyYes`. This is exact-share execution: a requested quantity either fills completely or reverts.
+5. To cancel, the maker calls `Aqua.dock(router, orderHash, [outcome, USDC])`. To change terms, publish a new order; filled counters cannot be reset through donation or reallocation.
+
+For a resting NO buyer at `price=400000` and `shares=1000000`, the taker spends 600000 USDC units. Aqua sends 400000 maker USDC units to the executor first. The callback verifies its complete active context and that 1000000 units have arrived, then escrows them, mints 1000000 YES units to the taker's recipient, and mints 1000000 NO units to the executor. SwapVM transfers those NO units through Aqua to the maker. Temporary approvals are cleared and no fees or trade balances remain in the executor/router. Tokens donated beforehand are preserved, not spent to subsidize a fill.
+
+Acquiring outcomes creates no sell authorization. A direct seller can explicitly approve and deliver existing matching outcomes to the fixed BUY through SwapVM, but publishing SELL strategies and routing direct trades through the product are Phase 2 work.
+
+## Arithmetic, lifecycle, and trust boundaries
+
+The maker's cumulative spend is `floor(filledShares * price / 1e6)`. A fill pays the difference between the new and old cumulative values; the taker pays `shares - makerSpend`. This makes total maker cost independent of splitting, keeps the posted price fixed as Aqua balances change, and guarantees full collateral on every mint. The `uint128` size cap and price bound keep multiplication within `uint256`. Both contributions must be positive; some tiny quantities or final dust fills are rejected. `maxTakerUSDC` protects the taker from the one-base-unit effects of prior fills and rounding.
+
+The executor quotes through a static call, binds the returned amounts and hash, transfers the exact taker cost, then swaps with output-first settlement. Public execution is guarded against reentrancy; callbacks require the configured router, an active unused order, exact participants/tokens/amounts, and the expected USDC balance. A failure after pair minting still reverts **all** collateral, token issuance, contribution transfers, approvals, and filled counters.
+
+Only canonical BUY orders use the Horizon instruction. It reconstructs and hashes the complete maker order, rejecting changed tokens, receiver, hooks, traits, extra instructions, and signature mode. The inherited generic SwapVM entry points remain available: do not interpret every arbitrary `Aqua.ship` record as a valid Horizon strategy. Canonical validation is required during discovery. A different program has a different Aqua authorization and cannot reuse a legitimate BUY's allowance.
+
+Aqua allocations are permissions, not reserved wallet funds. Static quotes read strategy state but do not guarantee the maker still has sufficient wallet balance/allowance. Phase 2 must refresh shared wallet capacity and simulate complete routes. The local test explicitly spends a shared wallet in market A and shows market B reverting without effects, despite its still-positive allocation.
+
+At `block.timestamp >= closeAt`, minting and Horizon fills stop even if nobody submits `close()`. The immutable resolver can then resolve exactly once to YES, NO, or INVALID with a nonempty evidence reference. The admin role is centralized and there is no dispute or timeout fallback in this MVP. YES/NO pays one USDC per winning outcome; losing tokens can be burned for zero. All redemption burns the caller's claims before transferring collateral.
+
+INVALID pays half per outcome. Since USDC cannot transfer half of one base unit, `invalidRemainder[holder]` retains that fraction for the holder's next claim. Combining or splitting that holder's claims preserves total payout. Fractions at different accounts are not transferable/combined, so tiny dust may remain escrowed permanently; there is no admin sweep. The escrow tracks backing separately from unsolicited USDC donations.
+
+## Events for The Graph
+
+Index `MarketRegistry.MarketCreated` to discover market/token contracts and their fixed rules. Use dynamic market templates for `PairMinted`, `CollateralChanged`, `MarketClosed`, `MarketResolved`, and `Redeemed`; token `Transfer` events support holdings. Trading closes by timestamp, so do not rely on a `MarketClosed` transaction being sent promptly.
+
+Track Aqua `Shipped`/`Docked` for publication/cancellation, filtering the Horizon app address and validating the complete canonical order. `BuyFilled` gives market, maker, side, fill quantity, USDC spend, and cumulative filled size. `ComplementaryMatched` gives both buyer contributions and the taker/recipient; upstream `Swapped` supplies the actual settlement pair. These events exist and are tested locally; a deployed Subgraph and Graph-backed API are the next phase.
 
 ## Source provenance
 
@@ -37,6 +80,6 @@ These tests use freely minted mock ERC-20 assets. They establish settlement orde
 
 ## Next contract work
 
-Implement the Phase 1 market registry, escrow, and registered outcome tokens. Replace the probe with a Horizon instruction that validates the exact configured USDC address and market-specific outcome token. Bind callbacks to the active route, router, order, market, amount limits, and recipient. Prove a 0.60 + 0.40 USDC complementary match that funds one complete pair atomically before building variable curves.
+Phase 2 adds curve presets, explicit SELL strategies, bounded multiple fills, off-chain integer pricing/routing, shared-wallet accounting, and live Graph discovery. Preserve Phase 1's economic and authorization tests when changing strategy encoding. The full local suite now supplements the original protocol probe with lifecycle, wrong-market/token rejection, both complementary directions, donation isolation, cancellation, price/deadline limits, late-failure rollback, and collateral/rounding fuzz checks.
 
 No deployed address is recorded yet. The address defaults in `.env.example` are candidates from official documentation. Verify Sepolia bytecode identity and deployment configuration before treating them as trusted integration targets.

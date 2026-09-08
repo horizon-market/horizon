@@ -13,13 +13,13 @@ Read this roadmap and [PROJECT_BRIEF.md](/Users/xana/work/ethglobal2026/horizon/
 - Build capacity: **one human builder with AI assistance**.
 - Original time budget: **four days**, stated on September 8, 2026. Reassess remaining time when continuing; a new task does not restart the clock.
 - Required integrations: **1inch Aqua/SwapVM, The Graph, Hedera x402, and World**. All four are required, not optional stretch goals.
-- Current status, September 8, 2026: **Phase 0 local foundation implemented and tested**. Express, authenticated read-only AdminJS, Prisma/PostgreSQL, a separate durable worker, source pins, and local Aqua/SwapVM transfer probes work. Live deployments and sponsor account checks remain pending; the user will provide accounts/APIs later.
-- Next milestone: Phase 1 market lifecycle and the first **fully backed** flat-price complementary match. The existing protocol probe uses pre-minted test assets and does not yet implement this match.
+- Current status, September 9, 2026: **Phase 1 contract exit verified locally**. A registry, isolated USDC escrows, market-specific YES/NO tokens, immutable rules/resolvers, fixed-price Aqua/SwapVM buying strategies, and authenticated complementary minting work. The 0.60 + 0.40 USDC match and subsequent redemption pass against the pinned protocols. The TypeScript/admin/ORM/worker foundation remains available.
+- Next milestone: **Phase 2 curves, bounded routing, and live Graph indexing**. Horizon has not yet been deployed to Sepolia. Credentials are now populated locally; actual Graph deployment, World proof verification, and Hedera payments remain unproven.
 - Setup, test evidence, current limitations, and pending access: [OPERATIONS.md](OPERATIONS.md). Protocol source provenance: [contracts/README.md](contracts/README.md).
 
 Useful continuation prompt:
 
-> Read /Users/xana/work/ethglobal2026/horizon/README.md, PROJECT_BRIEF.md, and OPERATIONS.md. Continue Horizon from this context rather than restarting product discovery. Phase 0's local TypeScript/admin/ORM/worker stack is installed and tested; source pins and a local Aqua/SwapVM transfer probe exist. Preserve confirmed product choices and work on the requested phase. The next contract milestone is Phase 1's backed complementary match. Live sponsor access is pending until the user provides accounts/APIs. Keep these documents updated with evidence.
+> Read /Users/xana/work/ethglobal2026/horizon/README.md, PROJECT_BRIEF.md, OPERATIONS.md, and contracts/README.md. Continue Horizon from this context rather than restarting product discovery. Phase 1's backed complementary match and market lifecycle pass locally; the TypeScript/admin/ORM/worker stack is also available. Continue with Phase 2 curves, bounded routing, and live Graph indexing. Preserve zero trading fees, USDC-only sharing, market-specific outcomes, and explicit resale authorization. Credentials exist locally, but Horizon deployment and live sponsor flows remain pending. Keep these documents updated with evidence and never print secrets.
 
 ## Confirmed product choices
 
@@ -62,7 +62,7 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 - [x] Establish the Horizon repository and record dependency/source provenance with normal incremental commits.
 - [x] Pin compatible official Aqua/SwapVM sources and test a custom opcode extension with actual local token transfers and output-first callbacks.
 - [ ] Verify the chosen deployed Aqua registry and the eventual Horizon router on Sepolia.
-- [ ] Establish trading-network RPC access, gas, and test USDC.
+- [x] Establish trading-network RPC access, gas, and test USDC (read-only doctor checks confirmed Sepolia and positive deployer balances; no deployment gas estimate yet).
 - [ ] Confirm Graph Studio access and deploy a minimal live indexing path as soon as there are relevant events.
 - [ ] Check the World developer app and request Selfie Check/Sandbox access if necessary.
 - [ ] Prove a small Blocky402-settled Hedera payment from an agent and from a browser wallet.
@@ -75,14 +75,16 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 
 ### Phase 1 — Market lifecycle and first match: Day 1 remainder
 
-- [ ] Implement a market registry/factory, ERC-20 outcomes, collateral escrow, closing, resolution, and redemption.
-- [ ] Fix the question, rules, evidence source, deadline, and resolver before trading starts.
-- [ ] Implement one flat-price Horizon SwapVM strategy with market/token validation.
-- [ ] Prove output-first settlement and an authenticated callback for complementary minting.
-- [ ] Demonstrate a YES buyer contributing 0.60 USDC and a NO buyer contributing 0.40 USDC to mint a fully backed pair.
-- [ ] Emit the market, strategy, fill, collateral, and resolution events needed for indexing.
+- [x] Implement a market registry/factory, ERC-20 outcomes, collateral escrow, closing, resolution, and redemption.
+- [x] Fix the question, rules, evidence source, deadline, and resolver before trading starts.
+- [x] Implement one flat-price Horizon SwapVM strategy with market/token validation.
+- [x] Prove output-first settlement and an authenticated callback for complementary minting.
+- [x] Demonstrate a YES buyer contributing 0.60 USDC and a NO buyer contributing 0.40 USDC to mint a fully backed pair.
+- [x] Emit the market, strategy, fill, collateral, and resolution events needed for indexing (Aqua supplies strategy ship/dock events).
 
 **Exit:** one transaction transfers both contributions, locks the collateral, and delivers both outcomes; a later resolution permits correct redemption.
+
+**Evidence, September 9:** 33 Foundry tests pass, including two fuzz properties with 256 cases each. Tests cover both complementary directions, YES/NO/INVALID payouts, persistent flat-price partial fills, wrong tokens/markets, authorization and callback rejection, cancellation, shared-wallet depletion, and rollback even when the final Aqua transfer fails after minting. Run `npm run contracts:demo` for the traced 0.60/0.40 match and redemption, or `npm run contracts:test` for the suite. Both run locally without credentials or testnet spending. [Contract details and integration instructions](contracts/README.md) describe units, rounding, ABI entry points, event discovery, and remaining work.
 
 ### Phase 2 — Curves, routing, and live indexing: Day 2
 

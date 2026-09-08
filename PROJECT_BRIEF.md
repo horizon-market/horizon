@@ -2,7 +2,7 @@
 
 Planning snapshot: **September 8, 2026**. Event: **ETHOnline 2026**. Team: **one human builder with AI assistance**. Original delivery window: **four days**.
 
-This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Phase 0's local foundation now exists; the prediction-market behavior below remains a product design until its phase is implemented and tested.
+This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Update September 9: Phase 1's fixed-price complementary match, collateralized market lifecycle, and redemption now pass locally against pinned Aqua/SwapVM sources. Variable curves, route aggregation, the trading frontend, and live sponsor flows remain planned. Contract interfaces and limits are in [contracts/README.md](contracts/README.md).
 
 ## 1. Product thesis
 
@@ -92,7 +92,11 @@ Each strategy binds maker, market, outcome token, direction, price endpoints, sh
 
 Extend official SwapVM with a Horizon pricing/validation instruction while retaining Aqua authorization and settlement. The extension must enforce market/token checks on the actual execution path, including attempts to submit unexpected programs or bypass the Horizon frontend. An arbitrary `Aqua.ship()` record is not sufficient proof of a valid Horizon market strategy.
 
-Local source inspection found output-first settlement and a pre-transfer-in callback in SwapVM. These provide a plausible complementary-mint route: receive maker USDC, combine the trader's contribution, mint, and deliver the complementary outcome before completing the swap. **This has not been tested for Horizon.** Callback authentication, transaction-local accounting, and reentrancy behavior are first-milestone tests.
+Phase 1 implements and locally tests output-first settlement and the pre-transfer-in callback in SwapVM: receive maker USDC, combine the trader's contribution, mint, and deliver the complementary outcome before completing the swap. `ComplementaryExecutor` binds the callback to its router, active order, maker, market-derived input token, amounts, and recipient; public execution uses a reentrancy guard. A failure in the final Aqua push rolls back minting and both contributions. This is local contract evidence, not a deployed sponsor demonstration.
+
+The current `HorizonSwapVM.BuyStrategy` binds market, YES/NO side, fixed price, maximum shares, and salt. Price and token quantities use six decimals. Cumulative maker cost is `floor(filled * price / 1e6)`; a fill pays the difference between cumulative endpoints, and the taker pays the exact remainder needed for collateral. Both contributions must be positive. Tiny fills may therefore be rejected; splitting a fill does not change total maker cost. This is the implemented flat-price baseline; shaped curves must retain explicit accounting and overflow bounds.
+
+`BinaryMarket` stores half of a USDC base unit per redeemer when INVALID claims round down. A later claim by the same account consumes that remainder. Fractions held by different accounts are not combined, so sub-micro-USDC dust can remain escrowed; there is no administrator sweep. No normal six-decimal USDC amount is taken as a protocol fee.
 
 ### Route types
 
