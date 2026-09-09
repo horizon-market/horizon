@@ -13,8 +13,8 @@ Read this roadmap and [PROJECT_BRIEF.md](/Users/xana/work/ethglobal2026/horizon/
 - Build capacity: **one human builder with AI assistance**.
 - Original time budget: **four days**, stated on September 8, 2026. Reassess remaining time when continuing; a new task does not restart the clock.
 - Required integrations: **1inch Aqua/SwapVM, The Graph, Hedera x402, and World**. All four are required, not optional stretch goals.
-- Current status, September 9, 2026: **Phase 2 exit verified live on Sepolia and The Graph**. Curve presets, direct/complementary trades, atomic four-fill execution, a shared-wallet-aware quote service, and a deployed Subgraph work. A live Graph-backed two-fill trade minted 2 YES backed by 2 USDC; stale-route and depleted-wallet checks passed. See [PHASE2.md](PHASE2.md) for contracts, API usage, arithmetic, and transaction evidence.
-- Next milestone: **Phase 3 creation service and React application**, including Graph-grounded AI, browser/agent Hedera x402 payments, World verification/discounts, and admin resolution. These live payment/identity flows remain unproven; credentials are populated locally.
+- Current status, September 9, 2026: **Phase 3 is complete apart from two credential-blocked flows, and Phase 4 verification and documentation are done**. On top of the live Phase 2 trading stack, an agent-owned client completed a real paid creation: 1 HBAR settled on Hedera testnet through Blocky402, a market was created on Sepolia under a creation id derived from its request id, and The Graph indexed it. The React application, the resumable creation workflow, and the operator screen all run against the live API. See [PHASE2.md](PHASE2.md) for the trading contracts and arithmetic, and [docs/EVIDENCE.md](docs/EVIDENCE.md) for the verified addresses, transactions and disclosed roles.
+- Next milestone: **close the four outstanding items and submit**. A browser-wallet Hedera payment (the WalletConnect client renders live requirements but has settled nothing yet), a World Selfie Check verification (fully implemented; `WORLD_SELFIE_ACCESS` is still `unknown`, so no credential has ever been verified and no discount granted), public HTTPS hosting, and the demo recording. A hosted-model drafting credential is also unconfigured, so the deterministic provider runs; it is grounded on the same live Graph data and labelled `development`.
 - Setup, test evidence, current limitations, and pending access: [OPERATIONS.md](OPERATIONS.md). Protocol source provenance: [contracts/README.md](contracts/README.md).
 
 Useful continuation prompt:
@@ -102,26 +102,30 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 
 ### Phase 3 — Creation service and application: Day 3
 
-- [ ] Build market browsing, a market detail/trading screen, curve publication, holdings, and an admin resolution flow.
-- [ ] Make AI drafting query live Graph data, explain duplicate/overlapping markets, and produce explicit resolution rules.
-- [ ] Let the requester review the draft before paying for creation.
-- [ ] Gate creation through Hedera x402 and Blocky402 for both browser and agent clients.
-- [ ] Verify World credentials server-side and compute eligibility before issuing payment requirements.
-- [ ] Persist request/payment/discount state; make a paid creation request resumable without double charging.
-- [ ] Add authenticated admin views and explicit retry/resolution actions; run durable service jobs in the backend worker.
-- [ ] Publish the frontend and API over HTTPS and consume the deployed Graph provider.
+- [x] Build market browsing, a market detail/trading screen, curve publication, holdings, and an admin resolution flow.
+- [x] Make AI drafting query live Graph data, explain duplicate/overlapping markets, and produce explicit resolution rules (grounded drafting and duplicate warnings run against the live Subgraph; the hosted-model provider is implemented but unexercised, so the deterministic provider runs and is labelled `development`).
+- [x] Let the requester review the draft before paying for creation.
+- [x] Gate creation through Hedera x402 and Blocky402 for both browser and agent clients (the agent client settled a real payment; the browser WalletConnect client renders live requirements but has not settled one yet).
+- [ ] Verify World credentials server-side and compute eligibility before issuing payment requirements (implemented and unit-tested end to end; `WORLD_SELFIE_ACCESS` is still `unknown`, so no credential has ever been verified).
+- [x] Persist request/payment/discount state; make a paid creation request resumable without double charging.
+- [x] Add authenticated admin views and explicit retry/resolution actions; run durable service jobs in the backend worker.
+- [ ] Publish the frontend and API over HTTPS and consume the deployed Graph provider (the app runs locally against the live Graph provider; no public hosting yet).
 
-**Exit:** a browser user and an agent each complete a paid creation request; a qualifying World credential changes the charged amount; the resulting market appears through live indexing.
+**Exit:** a browser user and an agent each complete a paid creation request; a qualifying World credential changes the charged amount; the resulting market appears through live indexing. **Partially met:** the agent path is complete and indexed; the browser payment and the World credential are outstanding.
+
+**Evidence, September 9:** an agent-owned client completed a real paid creation — 1 HBAR settled on Hedera testnet through Blocky402, market `0xBC11a878771E75a1C32bfB23A0B40db704F27432` created on Sepolia in block 11667797 under a creation id derived from its request id, and indexed by The Graph. `npm run doctor` re-verifies each of those against the Hedera mirror node, the Sepolia RPC and the Subgraph. The React application covers market browsing, a market detail and order ticket, curve publishing, holdings with redemption, the creation workflow and an operator screen. Local checks: 39 Foundry tests, 1 Anvil route test, 18 TypeScript unit tests and 13 PostgreSQL integration tests, including payment idempotency, requirement binding, ambiguous-settlement reconciliation, discount limits and request authorization. Details in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ### Phase 4 — Verification and submission: Day 4
 
-- [ ] Run contract, arithmetic, routing, payment, and browser-flow checks.
-- [ ] Verify public deployment addresses and document centralized creation/resolution roles.
-- [ ] Finish the World feedback document and sponsor-specific evidence.
+- [x] Run contract, arithmetic, routing, payment, and browser-flow checks (the browser flow was driven through drafting, approval, the verification state and the live 402 requirements; it stops at the wallet signature).
+- [x] Verify public deployment addresses and document centralized creation/resolution roles.
+- [ ] Finish the World feedback document and sponsor-specific evidence (sponsor evidence is complete; [docs/WORLD_FEEDBACK.md](docs/WORLD_FEEDBACK.md) is written with its Sandbox sections deliberately left blank until a credential is granted).
 - [ ] Record a three-to-four-minute demo using actual transactions and live indexed data.
-- [ ] Reserve the final half-day for fixes, deployment checks, documentation, and submission.
+- [ ] Reserve the final half-day for fixes, deployment checks, documentation, and submission (documentation is done; deployment and submission remain).
 
-**Exit:** public repository, working application/API, contract/payment transaction evidence, Graph endpoint, World feedback, and demo video are ready. Prize eligibility is assessed against the actual implementation, not this plan.
+**Exit:** public repository, working application/API, contract/payment transaction evidence, Graph endpoint, World feedback, and demo video are ready. Prize eligibility is assessed against the actual implementation, not this plan. **Outstanding:** a browser-wallet payment, a verified World credential, public HTTPS hosting, and the demo recording.
+
+**Documentation:** [docs/SETUP.md](docs/SETUP.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (including the x402 payment flow), [docs/EVIDENCE.md](docs/EVIDENCE.md) and [docs/WORLD_FEEDBACK.md](docs/WORLD_FEEDBACK.md) are public and exclude the private planning notes.
 
 ## Acceptance checks
 
