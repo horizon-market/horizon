@@ -27,6 +27,22 @@ export type IndexedMarket = {
   collateral: bigint; createdAt: number; curves: IndexedCurve[];
 };
 export type IndexedSnapshot = { block: number; hash: Hex; markets: IndexedMarket[] };
+const marketRef = z.object({ id: address, question: z.string().max(400) });
+const activitySchema = z.object({
+  _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }),
+  strategies: z.array(strategySchema.extend({ market: marketRef, filled: integer, active: z.boolean(), publishedAt: integer })).max(200),
+  fills: z.array(z.object({ id: z.string(), shares: integer, usdc: integer, block: integer, transaction: z.string(),
+    strategy: z.object({ id: z.string(), maker: address, flags: z.number().int().min(0).max(15), market: marketRef }) })).max(200),
+  routes: z.array(z.object({ id: z.string(), taker: address, recipient: address, isYes: z.boolean(), isBuy: z.boolean(),
+    shares: integer, usdc: integer, fills: integer, transaction: z.string(), block: integer, market: marketRef })).max(200),
+});
+export type OperatorCurve = { id: Hex; maker: Address; market: Address; question: string; flags: number;
+  startPrice: number; endPrice: number; maxShares: bigint; filled: bigint; active: boolean; publishedAt: number; salt: Hex };
+export type OperatorFill = { id: Hex; strategy: Hex; maker: Address; flags: number; market: Address; question: string;
+  shares: bigint; usdc: bigint; block: number; transaction: Hex };
+export type OperatorRoute = { id: Hex; market: Address; question: string; taker: Address; recipient: Address;
+  isYes: boolean; isBuy: boolean; shares: bigint; usdc: bigint; fills: number; transaction: Hex; block: number };
+export type IndexedActivity = { block: number; hash: Hex; curves: OperatorCurve[]; fills: OperatorFill[]; routes: OperatorRoute[] };
 function toSnapshot(data: z.infer<typeof snapshotSchema>): IndexedSnapshot {
   if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
   return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, markets: data.markets.map(market => ({
@@ -66,6 +82,49 @@ export class GraphProvider {
       candidates: data.strategies.map(s => ({ id: s.id as Hex, maker: s.maker as Address, strategy: {
         market: s.market.id as Address, flags: s.flags, startPrice: Number(s.startPrice), endPrice: Number(s.endPrice), maxShares: BigInt(s.maxShares), salt: s.salt as Hex,
       } })) };
+  }
+  /**
+   * Operator view of one market or of every market: published curves including cancelled and
+   * exhausted ones, the individual fills against them, and the taker routes that produced them.
+   */
+  async activity(market?: Address, first = 50): Promise<IndexedActivity> {
+    const scoped = Boolean(market);
+    const declaration = scoped ? '($first: Int!, $market: Bytes!)' : '($first: Int!)';
+    const byMarket = scoped ? ', where: { market: $market }' : '';
+    const byStrategyMarket = scoped ? ', where: { strategy_: { market: $market } }' : '';
+    const data = activitySchema.parse(await this.query(`query Activity${declaration} {
+      _meta { block { number hash } hasIndexingErrors }
+      strategies(first: $first, orderBy: publishedAt, orderDirection: desc${byMarket}) {
+        id maker flags startPrice endPrice maxShares salt filled active publishedAt market { id question }
+      }
+      fills(first: $first, orderBy: block, orderDirection: desc${byStrategyMarket}) {
+        id shares usdc block transaction strategy { id maker flags market { id question } }
+      }
+      routes(first: $first, orderBy: block, orderDirection: desc${byMarket}) {
+        id taker recipient isYes isBuy shares usdc fills transaction block market { id question }
+      }
+    }`, scoped ? { first, market: market!.toLowerCase() } : { first }));
+    if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
+    return {
+      block: data._meta.block.number, hash: data._meta.block.hash as Hex,
+      curves: data.strategies.map(strategy => ({
+        id: strategy.id as Hex, maker: strategy.maker as Address, market: strategy.market.id as Address,
+        question: strategy.market.question, flags: strategy.flags, startPrice: Number(strategy.startPrice),
+        endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), filled: BigInt(strategy.filled),
+        active: strategy.active, publishedAt: Number(strategy.publishedAt), salt: strategy.salt as Hex,
+      })),
+      fills: data.fills.map(fill => ({
+        id: fill.id as Hex, strategy: fill.strategy.id as Hex, maker: fill.strategy.maker as Address,
+        flags: fill.strategy.flags, market: fill.strategy.market.id as Address, question: fill.strategy.market.question,
+        shares: BigInt(fill.shares), usdc: BigInt(fill.usdc), block: Number(fill.block), transaction: fill.transaction as Hex,
+      })),
+      routes: data.routes.map(route => ({
+        id: route.id as Hex, market: route.market.id as Address, question: route.market.question,
+        taker: route.taker as Address, recipient: route.recipient as Address, isYes: route.isYes, isBuy: route.isBuy,
+        shares: BigInt(route.shares), usdc: BigInt(route.usdc), fills: Number(route.fills),
+        transaction: route.transaction as Hex, block: Number(route.block),
+      })),
+    };
   }
   async markets() {
     return this.query(`{ _meta { block { number hash } hasIndexingErrors } markets(first: 50, orderBy: createdAt, orderDirection: desc) {

@@ -16,7 +16,8 @@ const WalletContext = createContext<Wallet>({ connect: async () => undefined });
 export const useConfig = () => useContext(ConfigContext)!;
 export const useWallet = () => useContext(WalletContext);
 
-const LINKS = [['/', 'Markets'], ['/holdings', 'Holdings'], ['/publish', 'Publish curve'], ['/create', 'Create market'], ['/admin', 'Admin']] as const;
+// The operator screen is deliberately absent from the navigation; it is reached by its path.
+const LINKS = [['/', 'Markets'], ['/holdings', 'Holdings'], ['/publish', 'Publish curve'], ['/create', 'Create market']] as const;
 
 export function App() {
   const route = useRoute();

@@ -58,13 +58,32 @@ export type CreationRequest = {
   fees: Fees;
 };
 export type PaymentRequirements = { scheme: string; network: string; maxAmountRequired: string; resource: string; description: string; payTo: string; maxTimeoutSeconds: number; asset: string; extra: { nonce: string; assetDecimals: number; settlementMode: string } };
+export type AdminMarket = {
+  market: string; question: string; closeAt: number; status: string; result: string; resolver: string;
+  rules: string; evidenceSource: string; collateral: string; resolutionEvidence: string; curves: number; resolvable: boolean;
+};
+export type OperatorCurve = {
+  id: string; maker: string; market: string; question: string; flags: number; startPrice: number; endPrice: number;
+  maxShares: string; filled: string; remaining: string; active: boolean; publishedAt: number; salt: string;
+  side: 'YES' | 'NO'; direction: 'BUY' | 'SELL'; shape: number;
+};
+export type OperatorFill = {
+  id: string; strategy: string; maker: string; market: string; question: string; shares: string; usdc: string;
+  block: number; transaction: string; side: 'YES' | 'NO'; direction: 'BUY' | 'SELL';
+};
+export type OperatorRoute = {
+  id: string; market: string; question: string; taker: string; recipient: string; isYes: boolean; isBuy: boolean;
+  shares: string; usdc: string; fills: number; transaction: string; block: number;
+};
+export type AdminActivity = { indexedBlock: number; market: string | null; curves: OperatorCurve[]; fills: OperatorFill[]; routes: OperatorRoute[]; fees: Fees };
 export type AdminOverview = {
   counts: Record<string, number>;
+  markets: AdminMarket[];
   requests: { id: string; status: string; question: string; requesterKind: string; requester: string; draftProvider: string | null; draftMode: string | null; discountBps: number; discountNote: string; priceUnits: string; marketAddress: string | null; creationTxHash: string | null; failureCode: string | null; attempts: number; createdAt: string; verified: boolean; paymentStatus: string | null }[];
   payments: { id: string; requestId: string; status: string; amountUnits: string; asset: string; facilitator: string; transactionRef: string | null; failureCode: string | null; attempts: number; createdAt: string }[];
   resolutions: { id: string; market: string; result: string; status: string; evidence: string; txHash: string | null; failureCode: string | null; attempts: number; createdAt: string }[];
   jobs: { id: string; label: string; completedAt: string }[];
-  awaitingResolution: { market: string; question: string; closeAt: number; resolver: string; rules: string; evidenceSource: string; collateral: string }[];
+  awaitingResolution: AdminMarket[];
   marketsError?: string;
   resolverModel: { centralized: boolean; disclosed: boolean; resolver: string | null; payouts: Record<string, string> };
 };
@@ -99,6 +118,7 @@ export const api = {
   adminLogin: (email: string, password: string) => post<{ authenticated: boolean; email: string }>('/api/admin/session', { email, password }),
   adminLogout: () => request<{ authenticated: boolean }>('/api/admin/session', { method: 'DELETE' }),
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  adminActivity: (market?: string) => request<AdminActivity>(`/api/admin/activity${market ? `?market=${market}` : ''}`),
   adminRetry: (id: string) => post<{ requestId: string; enqueued: boolean }>(`/api/admin/requests/${id}/retry`, {}),
   adminResolve: (market: string, result: string, evidence: string) => post<{ id: string; status: string }>('/api/admin/resolutions', { market, result, evidence }),
   adminReconcile: (id: string, outcome: 'SETTLED' | 'FAILED', reference: string) => post<{ id: string; status: string }>(`/api/admin/payments/${id}/reconciliation`, { outcome, reference }),

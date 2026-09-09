@@ -10,6 +10,7 @@ import { WorkflowError } from '../creation/service.js';
 export const RESOLUTIONS = { YES: 1, NO: 2, INVALID: 3 } as const;
 export type ResolutionResult = keyof typeof RESOLUTIONS;
 /** Disclosed centralized resolution for the MVP. INVALID pays 0.5 USDC per outcome token. */
+const RESULT_NAMES = ['UNRESOLVED', 'YES', 'NO', 'INVALID'] as const;
 export const PAYOUTS = { YES: '1 USDC per YES token, 0 per NO token', NO: '1 USDC per NO token, 0 per YES token', INVALID: '0.5 USDC per outcome token of either side' };
 
 export interface ResolutionSubmitter {
@@ -64,15 +65,21 @@ export class AdminService {
       db.jobRun.findMany({ orderBy: { completedAt: 'desc' }, take: 25 }),
       db.creationRequest.groupBy({ by: ['status'], _count: { _all: true } }),
     ]);
-    let awaitingResolution: unknown[] = [], marketsError: string | undefined;
+    let markets: unknown[] = [], awaitingResolution: unknown[] = [], marketsError: string | undefined;
     if (this.deps.markets) {
       try {
         const listed = await this.deps.markets.list();
         const now = Math.floor(Date.now() / 1000);
-        awaitingResolution = listed.markets
-          .filter(market => market.result === 0 && market.closeAt <= now)
-          .map(market => ({ market: market.id, question: market.question, closeAt: market.closeAt, resolver: market.resolver,
-            rules: market.rules, evidenceSource: market.evidenceSource, collateral: market.collateral.toString() }));
+        // Every market is listed so an operator can inspect and resolve any of them. The market
+        // contract refuses resolution before its close timestamp, so that is reported per row.
+        markets = listed.markets.map(market => ({
+          market: market.id, question: market.question, closeAt: market.closeAt, status: market.status,
+          result: RESULT_NAMES[market.result], resolver: market.resolver, rules: market.rules,
+          evidenceSource: market.evidenceSource, collateral: market.collateral.toString(),
+          resolutionEvidence: market.resolutionEvidence, curves: market.liquidity.curves,
+          resolvable: market.result === 0 && market.closeAt <= now,
+        }));
+        awaitingResolution = (markets as { resolvable: boolean }[]).filter(market => market.resolvable);
       } catch { marketsError = 'graph_unavailable'; }
     } else marketsError = 'trading_not_configured';
     return {
@@ -85,7 +92,7 @@ export class AdminService {
         attempts: request.attempts, createdAt: request.createdAt,
         verified: Boolean(request.verification), paymentStatus: request.payment?.status ?? null,
       })),
-      payments, resolutions, jobs, awaitingResolution, marketsError,
+      payments, resolutions, jobs, markets, awaitingResolution, marketsError,
       resolverModel: { centralized: true, disclosed: true, resolver: this.deps.submitter?.resolver ?? null, payouts: PAYOUTS },
     };
   }
@@ -124,7 +131,31 @@ export class AdminService {
     return updated;
   }
 
+  /**
+   * Reads published curves, their individual fills and the taker routes, for one market or for
+   * all of them. This is indexed history; settlement remains authoritative on chain.
+   */
+  async activity(market?: Address) {
+    if (!this.deps.markets) throw new WorkflowError('trading_not_configured', 503);
+    const indexed = await this.deps.markets.graph.activity(market);
+    return { indexedBlock: indexed.block, market: market ?? null,
+      curves: indexed.curves.map(curve => ({ ...curve, side: curve.flags & 1 ? 'YES' : 'NO',
+        direction: curve.flags & 2 ? 'BUY' : 'SELL', shape: curve.flags >> 2,
+        remaining: (curve.maxShares > curve.filled ? curve.maxShares - curve.filled : 0n).toString(),
+        maxShares: curve.maxShares.toString(), filled: curve.filled.toString() })),
+      fills: indexed.fills.map(fill => ({ ...fill, side: fill.flags & 1 ? 'YES' : 'NO',
+        direction: fill.flags & 2 ? 'BUY' : 'SELL', shares: fill.shares.toString(), usdc: fill.usdc.toString() })),
+      routes: indexed.routes.map(route => ({ ...route, shares: route.shares.toString(), usdc: route.usdc.toString() })),
+      fees: { maker: 0, taker: 0, routing: 0, protocol: 0 } };
+  }
+
   async requestResolution(actor: string, market: Address, result: ResolutionResult, evidence: string) {
+    // Refuse before the market's own close time rather than queueing a job the contract rejects.
+    if (this.deps.markets) {
+      const detail = await this.deps.markets.detail(market);
+      if (detail.market.result !== 0) throw new WorkflowError('market_already_resolved');
+      if (detail.market.status === 'OPEN') throw new WorkflowError('market_not_closed_yet', 422);
+    }
     const record = await this.deps.db.marketResolution.upsert({
       where: { market: market.toLowerCase() },
       create: { market: market.toLowerCase(), result, evidence, requestedBy: actor, status: 'PENDING' },

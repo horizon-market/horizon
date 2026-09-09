@@ -6,6 +6,8 @@ import { verifyPassword } from '../password.js';
 import { WorkflowError } from '../creation/service.js';
 import { AdminService, RESOLUTIONS, type ResolutionResult } from './service.js';
 import { address, serialize } from '../trading/http.js';
+import { MarketError } from '../trading/markets.js';
+import { GraphError } from '../trading/graph.js';
 
 declare module 'express-session' {
   interface SessionData { adminEmail?: string }
@@ -36,6 +38,8 @@ export function adminRoutes(config: Config, service: AdminService, session: Requ
   };
   const fail = (res: Response, error: unknown) => {
     if (error instanceof WorkflowError) { res.status(error.httpStatus).json({ error: error.code }); return; }
+    if (error instanceof MarketError) { res.status(error.message === 'unknown_market' ? 404 : 422).json({ error: error.message }); return; }
+    if (error instanceof GraphError) { res.status(503).json({ error: 'graph_unavailable' }); return; }
     console.error('Admin action failed; internal details withheld');
     res.status(500).json({ error: 'internal_error' });
   };
@@ -57,6 +61,12 @@ export function adminRoutes(config: Config, service: AdminService, session: Requ
 
   router.get('/overview', authenticated, async (_req, res) => {
     try { res.json(serialize(await service.overview())); } catch (error) { fail(res, error); }
+  });
+  // Curves, fills and routes, optionally scoped to one market.
+  router.get('/activity', authenticated, async (req, res) => {
+    const market = req.query.market === undefined ? undefined : address.safeParse(req.query.market);
+    if (market && !market.success) { res.status(400).json({ error: 'invalid_market' }); return; }
+    try { res.json(serialize(await service.activity(market?.data))); } catch (error) { fail(res, error); }
   });
   router.post('/requests/:id/retry', authenticated, jsonOnly, async (req, res) => {
     try { res.json(serialize(await service.retryCreation(actor(req), req.params.id!))); } catch (error) { fail(res, error); }
