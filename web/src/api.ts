@@ -14,9 +14,9 @@ export type Fees = { maker: number; taker: number; routing: number; protocol: nu
 export type AppConfig = {
   chainId: number; fees: Fees;
   trading: { registry: string; router: string; executor: string; aqua: string; usdc: string; decimals: number; maxRouteFills: number } | null;
-  creation: { available: boolean; priceUnits: string; discountBps: number; asset: string; assetDecimals: number; network: string; settlementMode: 'live' | 'simulated'; facilitator: string; note: string };
+  creation: { available: boolean; priceUnits: string; discountBps: number; asset: string; assetId: string; assetDecimals: number; network: string; settlementMode: 'live' | 'simulated'; facilitator: string; walletConnectProjectId: string | null; note: string };
   ai: { provider: string; mode: 'live' | 'development' };
-  world: { available: boolean; access: string; reason: string; action: string; appId: string };
+  world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'staging' | 'production' };
   resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string };
 };
 export type SideLiquidity = { ask: number | null; bid: number | null; availableShares: string };
@@ -57,7 +57,8 @@ export type CreationRequest = {
   payment: { status: string; network: string; asset: string; amountUnits: string; payTo: string; facilitator: string; transactionRef: string | null; payer: string | null; settledAt: string | null; failureCode: string | null; attempts: number } | null;
   fees: Fees;
 };
-export type PaymentRequirements = { scheme: string; network: string; maxAmountRequired: string; resource: string; description: string; payTo: string; maxTimeoutSeconds: number; asset: string; extra: { nonce: string; assetDecimals: number; settlementMode: string } };
+export type PaymentResource = { url: string; description?: string; mimeType?: string };
+export type PaymentRequirements = { scheme: string; network: string; amount: string; payTo: string; maxTimeoutSeconds: number; asset: string; extra: { feePayer?: string; nonce: string; assetDecimals: number; settlementMode: string } };
 export type AdminMarket = {
   market: string; question: string; closeAt: number; status: string; result: string; resolver: string;
   rules: string; evidenceSource: string; collateral: string; resolutionEvidence: string; curves: number; resolvable: boolean;
@@ -105,15 +106,17 @@ export const api = {
   getRequest: (id: string, token: string) => request<{ request: CreationRequest }>(`/api/creation/requests/${id}`, { headers: { authorization: `Bearer ${token}` } }),
   approve: (id: string, token: string, draftHash: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/approval`, { draftHash }, { authorization: `Bearer ${token}` }),
   verify: (id: string, token: string, proof: unknown) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/verification`, { proof }, { authorization: `Bearer ${token}` }),
+  worldContext: (id: string, token: string) => post<{ rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string }>(
+    `/api/creation/requests/${id}/world/rp-context`, {}, { authorization: `Bearer ${token}` }),
   requirePayment: async (id: string, token: string) => {
     const response = await fetch(`/api/creation/requests/${id}/payment`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: '{}' });
-    const body = await response.json() as { accepts?: PaymentRequirements[]; request: CreationRequest; paid?: boolean; error?: string };
-    if (response.status === 402) return { paid: false as const, accepts: body.accepts ?? [], request: body.request };
+    const body = await response.json() as { resource?: PaymentResource; accepts?: PaymentRequirements[]; request: CreationRequest; paid?: boolean; error?: string };
+    if (response.status === 402) return { paid: false as const, resource: body.resource, accepts: body.accepts ?? [], request: body.request };
     if (!response.ok) throw new ApiError(response.status, body.error ?? 'payment_failed');
-    return { paid: true as const, accepts: [], request: body.request };
+    return { paid: true as const, resource: undefined, accepts: [], request: body.request };
   },
   pay: (id: string, token: string, header: string) =>
-    post<{ paid: boolean; replay: boolean; request: CreationRequest }>(`/api/creation/requests/${id}/payment`, {}, { authorization: `Bearer ${token}`, 'x-payment': header }),
+    post<{ paid: boolean; replay: boolean; request: CreationRequest }>(`/api/creation/requests/${id}/payment`, {}, { authorization: `Bearer ${token}`, 'payment-signature': header }),
   adminSession: () => request<{ authenticated: boolean; email: string | null }>('/api/admin/session'),
   adminLogin: (email: string, password: string) => post<{ authenticated: boolean; email: string }>('/api/admin/session', { email, password }),
   adminLogout: () => request<{ authenticated: boolean }>('/api/admin/session', { method: 'DELETE' }),

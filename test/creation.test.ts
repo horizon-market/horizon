@@ -5,14 +5,15 @@ import { creationPrice, formatUnits, utcDay } from '../src/creation/pricing.js';
 import { findDuplicates, similarity } from '../src/creation/duplicates.js';
 import { draftHash, draftSchema } from '../src/creation/types.js';
 import { DevelopmentDraftProvider } from '../src/creation/ai.js';
-import { decodePayment, buildRequirements, SimulatedFacilitator, PaymentPayloadError } from '../src/payments/x402.js';
-import { createVerifier, UnavailableVerifier } from '../src/world/verifier.js';
+import { decodePayment, buildRequirements, paymentMatches, SimulatedFacilitator, PaymentPayloadError } from '../src/payments/x402.js';
+import { createRpContext, createVerifier, proofSchema, UnavailableVerifier, VerificationRejectedError, VerificationUnavailableError, WorldSelfieVerifier } from '../src/world/verifier.js';
+import { hashSignal } from '@worldcoin/idkit-core/hashing';
 import { summarize } from '../src/trading/liquidity.js';
 import { marginalPrice } from '../src/trading/math.js';
 import type { PaymentsConfig } from '../src/config.js';
 
 const payments: PaymentsConfig = { facilitatorUrl: 'https://facilitator.invalid', network: 'hedera:testnet', payTo: '0.0.1234',
-  asset: 'HBAR', assetDecimals: 8, mode: 'simulated', priceUnits: 100_000_000n, discountBps: 5000, timeoutSeconds: 300 };
+  asset: '0.0.0', assetDecimals: 8, mode: 'simulated', priceUnits: 100_000_000n, discountBps: 5000, timeoutSeconds: 300 };
 
 test('creation workflow only advances along declared transitions', () => {
   assert.equal(transition('DRAFT', 'approve'), 'APPROVED');
@@ -88,14 +89,16 @@ test('the development draft provider produces a reviewable draft grounded on ind
 });
 
 test('x402 requirements and payloads are validated before any settlement attempt', async () => {
-  const requirements = buildRequirements(payments, { amountUnits: 50_000_000n, resource: 'https://horizon.local/api/creation/requests/x/payment', description: 'test', nonce: 'abc' });
+  const requirements = await new SimulatedFacilitator().prepare(buildRequirements(payments, { amountUnits: 50_000_000n, nonce: 'abc' }));
   assert.equal(requirements.scheme, 'exact');
-  assert.equal(requirements.maxAmountRequired, '50000000');
+  assert.equal(requirements.amount, '50000000');
+  assert.equal(requirements.asset, '0.0.0');
+  assert.equal(requirements.extra.feePayer, '0.0.0');
   assert.equal(requirements.extra.settlementMode, 'simulated');
   assert.throws(() => decodePayment('not-base64-json'), (error: unknown) => error instanceof PaymentPayloadError);
-  assert.throws(() => decodePayment(Buffer.from(JSON.stringify({ x402Version: 1, scheme: 'exact', network: 'hedera:testnet', payload: {} })).toString('base64')),
+  assert.throws(() => decodePayment(Buffer.from(JSON.stringify({ x402Version: 1, accepted: requirements, payload: {} })).toString('base64')),
     (error: unknown) => error instanceof PaymentPayloadError);
-  const header = Buffer.from(JSON.stringify({ x402Version: 2, scheme: 'exact', network: 'hedera:testnet', payload: { payer: '0.0.9' } })).toString('base64');
+  const header = Buffer.from(JSON.stringify({ x402Version: 2, accepted: requirements, payload: { payer: '0.0.9' } })).toString('base64');
   const payload = decodePayment(header);
   const facilitator = new SimulatedFacilitator();
   assert.deepEqual(await facilitator.verify(payload, requirements), { valid: true, payer: '0.0.9' });
@@ -103,16 +106,66 @@ test('x402 requirements and payloads are validated before any settlement attempt
   // The simulated facilitator labels its own output; it never looks like a Hedera receipt.
   assert.ok(settled.transaction.startsWith('simulated:'));
   assert.equal(settled.mode, 'simulated');
-  assert.deepEqual(await facilitator.verify({ ...payload, network: 'hedera:mainnet' }, requirements), { valid: false, reason: 'network_mismatch' });
+  assert.deepEqual(await facilitator.verify({ ...payload, accepted: { ...payload.accepted, network: 'hedera:mainnet' } }, requirements), { valid: false, reason: 'network_mismatch' });
 });
 
 test('World verification is unavailable until access is granted, and never grants a discount by default', async () => {
-  const verifier = createVerifier({ appId: 'app_test', action: 'create-market', environment: 'staging', access: 'unknown', verifyUrl: 'https://developer.worldcoin.org' });
+  const verifier = createVerifier({ appId: 'app_test', rpId: 'rp_test', action: 'create-market', environment: 'staging', access: 'unknown', verifyUrl: 'https://developer.world.org' });
   assert.equal(verifier.available, false);
   assert.ok(verifier instanceof UnavailableVerifier);
   await assert.rejects(() => verifier.verify(), /verification_unavailable/);
-  assert.equal(createVerifier({ appId: '', action: '', environment: 'staging', access: 'granted', verifyUrl: 'https://developer.worldcoin.org' }).available, false);
-  assert.equal(createVerifier({ appId: 'app_test', action: 'create-market', environment: 'staging', access: 'granted', verifyUrl: 'https://developer.worldcoin.org' }).available, true);
+  assert.equal(createVerifier({ appId: '', rpId: '', action: '', environment: 'staging', access: 'granted', verifyUrl: 'https://developer.world.org' }).available, false);
+  assert.equal(createVerifier({ appId: 'app_test', rpId: 'rp_test', action: 'create-market', environment: 'staging', access: 'granted', verifyUrl: 'https://developer.world.org' }).available, true);
+  const rp = createRpContext({ appId: 'app_test', rpId: 'rp_test', signingKey: `0x${'11'.repeat(32)}`, action: 'create-market', environment: 'staging', access: 'granted', verifyUrl: 'https://developer.world.org' });
+  assert.equal(rp.rp_id, 'rp_test');
+  assert.match(rp.signature, /^0x[0-9a-f]+$/i);
+  assert.ok(rp.expires_at > rp.created_at);
+  proofSchema.parse({
+    protocol_version: '3.0', nonce: 'request-nonce', action: 'create-market', environment: 'staging', user_presence_completed: true,
+    responses: [{ identifier: 'selfie', signal_hash: `0x${'12'.repeat(32)}`, proof: `0x${'34'.repeat(64)}`,
+      merkle_root: `0x${'56'.repeat(32)}`, nullifier: `0x${'78'.repeat(32)}` }],
+  });
+});
+
+test('a payment authorization must match the exact requirements that were issued', async () => {
+  const requirements = await new SimulatedFacilitator().prepare(buildRequirements(payments, { amountUnits: 50_000_000n, nonce: 'issued-nonce' }));
+  const payload = { x402Version: 2 as const, accepted: requirements, payload: { payer: '0.0.9' } };
+  assert.equal(paymentMatches(payload, requirements), true);
+  // Every field a payer could rewrite to underpay, redirect or replay must break the binding.
+  const tampered: Partial<typeof requirements>[] = [
+    { amount: '1' }, { payTo: '0.0.9999' }, { asset: '0.0.1234' }, { network: 'hedera:mainnet' },
+    { maxTimeoutSeconds: 1 }, { scheme: 'exact2' as 'exact' },
+  ];
+  for (const change of tampered) {
+    assert.equal(paymentMatches({ ...payload, accepted: { ...requirements, ...change } }, requirements), false, JSON.stringify(change));
+  }
+  for (const extra of [{ nonce: 'other-nonce' }, { feePayer: '0.0.4242' }]) {
+    assert.equal(paymentMatches({ ...payload, accepted: { ...requirements, extra: { ...requirements.extra, ...extra } } }, requirements), false, JSON.stringify(extra));
+  }
+});
+
+test('a World proof is refused unless it is bound to this action, environment and request', async () => {
+  // An unreachable endpoint keeps this offline: reaching it proves the binding checks passed.
+  const config = { appId: 'app_test', rpId: 'rp_test', signingKey: `0x${'11'.repeat(32)}`, action: 'create-market',
+    environment: 'staging' as const, access: 'granted' as const, verifyUrl: 'http://127.0.0.1:1' };
+  const verifier = new WorldSelfieVerifier(config);
+  const requestId = '11111111-2222-3333-4444-555555555555';
+  const proof = (overrides: Record<string, unknown> = {}, signal = requestId) => proofSchema.parse({
+    protocol_version: '3.0', nonce: 'request-nonce', action: config.action, environment: config.environment,
+    user_presence_completed: true,
+    responses: [{ identifier: 'selfie', signal_hash: hashSignal(signal).toLowerCase(), proof: `0x${'34'.repeat(64)}`,
+      merkle_root: `0x${'56'.repeat(32)}`, nullifier: `0x${'78'.repeat(32)}` }],
+    ...overrides,
+  });
+  await assert.rejects(() => verifier.verify(proof({ action: 'another-action' }), requestId),
+    (error: unknown) => error instanceof VerificationRejectedError);
+  await assert.rejects(() => verifier.verify(proof({ environment: 'production' }), requestId),
+    (error: unknown) => error instanceof VerificationRejectedError);
+  // A credential proved for a different creation request cannot be replayed onto this one.
+  await assert.rejects(() => verifier.verify(proof({}, 'another-request'), requestId),
+    (error: unknown) => error instanceof VerificationRejectedError);
+  await assert.rejects(() => verifier.verify(proof(), requestId),
+    (error: unknown) => error instanceof VerificationUnavailableError);
 });
 
 test('indexed liquidity treats complementary buy curves as available depth for the other outcome', () => {

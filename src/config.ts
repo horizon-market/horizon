@@ -17,10 +17,10 @@ const schema = z.object({
 /** Hedera x402 charge for the creation service only. It is unrelated to trading, which has no fee. */
 export type PaymentsConfig = {
   facilitatorUrl: string; network: string; payTo: string; asset: string; assetDecimals: number;
-  mode: 'live' | 'simulated'; priceUnits: bigint; discountBps: number; timeoutSeconds: number;
+  mode: 'live' | 'simulated'; priceUnits: bigint; discountBps: number; timeoutSeconds: number; walletConnectProjectId?: string;
 };
 /** World access is an administrative declaration; only `granted` may attempt a live verification. */
-export type WorldConfig = { appId: string; action: string; environment: string; access: 'unknown' | 'requested' | 'granted'; verifyUrl: string };
+export type WorldConfig = { appId: string; rpId: string; signingKey?: string; action: string; environment: 'staging' | 'production'; access: 'unknown' | 'requested' | 'granted'; verifyUrl: string };
 export type AiConfig = { provider: 'anthropic' | 'development'; apiKey?: string; model: string };
 /** Server-side market deployment. The key stays in the API/worker process and never reaches a browser. */
 export type CreationConfig = { rpc: string; registry: Address; resolver: Address; privateKey?: Hex; minCloseInSeconds: number; maxCloseInSeconds: number };
@@ -49,20 +49,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!Number.isInteger(assetDecimals) || assetDecimals < 0 || assetDecimals > 18) throw new Error('Invalid configuration: HEDERA_ASSET_DECIMALS');
   const mode = env.HEDERA_PAYMENT_MODE === 'simulated' ? 'simulated' : 'live';
   const access = ['unknown', 'requested', 'granted'].includes(env.WORLD_SELFIE_ACCESS ?? '') ? env.WORLD_SELFIE_ACCESS as WorldConfig['access'] : 'unknown';
+  const worldEnvironment = env.WORLD_ENVIRONMENT === 'production' ? 'production' : 'staging';
   const config: Config = {
     ...result.data,
     payments: {
       facilitatorUrl: env.HEDERA_FACILITATOR_URL || 'https://api.testnet.blocky402.com',
       network: env.HEDERA_NETWORK || 'hedera:testnet',
       payTo: env.HEDERA_RECEIVER_ACCOUNT_ID ?? '',
-      asset: env.HEDERA_ASSET_SYMBOL || 'HBAR',
+      asset: env.HEDERA_ASSET_ID || '0.0.0',
       assetDecimals, mode,
       priceUnits: positiveInteger(env.CREATION_PRICE_UNITS, 100_000_000n),
-      discountBps, timeoutSeconds: 300,
+      discountBps, timeoutSeconds: 300, walletConnectProjectId: env.HEDERA_WALLETCONNECT_PROJECT_ID || undefined,
     },
     world: {
-      appId: env.WORLD_APP_ID ?? '', action: env.WORLD_ACTION ?? '', environment: env.WORLD_ENVIRONMENT || 'staging',
-      access, verifyUrl: env.WORLD_VERIFY_URL || 'https://developer.worldcoin.org',
+      appId: env.WORLD_APP_ID ?? '', rpId: env.WORLD_RP_ID ?? '', signingKey: env.WORLD_RP_SIGNING_KEY || undefined,
+      action: env.WORLD_ACTION ?? '', environment: worldEnvironment,
+      access, verifyUrl: env.WORLD_VERIFY_URL || 'https://developer.world.org',
     },
     ai: {
       provider: env.AI_PROVIDER === 'anthropic' || (env.AI_PROVIDER !== 'development' && env.ANTHROPIC_API_KEY) ? 'anthropic' : 'development',

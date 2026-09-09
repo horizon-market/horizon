@@ -3,8 +3,8 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PaymentsConfig, WorldConfig } from '../config.js';
 import { creationPrice, utcDay } from './pricing.js';
 import { draftHash, draftSchema, DraftError, type MarketContext, type MarketDraft, type MarketDraftProvider } from './types.js';
-import { buildRequirements, decodePayment, paymentNonce, payloadFingerprint, PaymentPayloadError, PaymentRejectedError, SettlementAmbiguousError, type PaymentFacilitator } from '../payments/x402.js';
-import { proofSchema, VerificationRejectedError, VerificationUnavailableError, type HumanVerifier, type VerificationProof } from '../world/verifier.js';
+import { buildRequirements, decodePayment, paymentMatches, paymentNonce, payloadFingerprint, PaymentPayloadError, PaymentRejectedError, SettlementAmbiguousError, type PaymentFacilitator } from '../payments/x402.js';
+import { createRpContext, proofSchema, VerificationRejectedError, VerificationUnavailableError, type HumanVerifier, type VerificationProof } from '../world/verifier.js';
 import type { MarketDeployer } from './onchain.js';
 
 export const STATUSES = ['DRAFT', 'APPROVED', 'PAYMENT_REQUIRED', 'PAYMENT_REVIEW', 'PAID', 'CREATING', 'CREATED', 'FAILED'] as const;
@@ -98,6 +98,13 @@ export class CreationService {
 
   async get(id: string, token: string | undefined) { return this.load(id, token); }
 
+  async worldContext(id: string, token: string | undefined) {
+    const request = await this.load(id, token);
+    if (request.status !== 'APPROVED') throw new WorkflowError('verification_not_available_for_status', 409);
+    try { return createRpContext(this.deps.world); }
+    catch { throw new WorkflowError('verification_unavailable', 503); }
+  }
+
   /** A human approves the exact reviewed draft; a changed draft invalidates the approval hash. */
   async approve(id: string, token: string | undefined, approvedHash: string) {
     const request = await this.load(id, token);
@@ -117,7 +124,7 @@ export class CreationService {
     if (request.payment) throw new WorkflowError('verification_after_payment_requirements', 409);
     if (!this.deps.verifier.available) throw new WorkflowError('verification_unavailable', 503);
     let result;
-    try { result = await this.deps.verifier.verify(proofSchema.parse(proof)); }
+    try { result = await this.deps.verifier.verify(proofSchema.parse(proof), id); }
     catch (error) {
       if (error instanceof VerificationUnavailableError) throw new WorkflowError('verification_unavailable', 503);
       if (error instanceof VerificationRejectedError) throw new WorkflowError('verification_rejected', 422);
@@ -170,11 +177,10 @@ export class CreationService {
     return { ...result, replay: false, resource };
   }
 
-  requirements(payment: { amountUnits: string; nonce: string }, resource: string) {
-    return buildRequirements(this.deps.payments, {
-      amountUnits: BigInt(payment.amountUnits), nonce: payment.nonce, resource,
-      description: 'Horizon market creation service. This charge is for creation only; Horizon takes no trading fee.',
-    });
+  async requirements(payment: { amountUnits: string; nonce: string }) {
+    const base = buildRequirements(this.deps.payments, { amountUnits: BigInt(payment.amountUnits), nonce: payment.nonce });
+    try { return await this.deps.facilitator.prepare(base); }
+    catch { throw new WorkflowError('payment_facilitator_unavailable', 503); }
   }
 
   /**
@@ -192,8 +198,9 @@ export class CreationService {
     let payload;
     try { payload = decodePayment(header); }
     catch (error) { throw new WorkflowError(error instanceof PaymentPayloadError ? error.message : 'payment_payload_invalid', 400); }
-    const requirements = this.requirements(payment, resource);
-    if (payload.network !== requirements.network) throw new WorkflowError('payment_network_mismatch', 400);
+    const requirements = await this.requirements(payment);
+    if (payload.accepted.network !== requirements.network) throw new WorkflowError('payment_network_mismatch', 400);
+    if (!paymentMatches(payload, requirements)) throw new WorkflowError('payment_requirements_mismatch', 400);
     const claimed = await this.deps.db.paymentIntent.updateMany({
       where: { id: payment.id, status: { in: ['REQUIRED', 'FAILED'] } },
       data: { status: 'SUBMITTED', attempts: { increment: 1 } },
@@ -208,8 +215,9 @@ export class CreationService {
     try { settled = await this.deps.facilitator.settle(payload, requirements); }
     catch (error) {
       if (error instanceof SettlementAmbiguousError) {
+        const evidence = `settlement_ambiguous:${error.reason}`.slice(0, 200);
         await this.deps.db.$transaction([
-          this.deps.db.paymentIntent.update({ where: { id: payment.id }, data: { status: 'REVIEW', failureCode: 'settlement_ambiguous' } }),
+          this.deps.db.paymentIntent.update({ where: { id: payment.id }, data: { status: 'REVIEW', failureCode: evidence } }),
           this.deps.db.creationRequest.update({ where: { id }, data: { status: 'PAYMENT_REVIEW' } }),
         ]);
         throw new WorkflowError('payment_awaiting_reconciliation', 409);

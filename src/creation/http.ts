@@ -92,6 +92,11 @@ export function creationRoutes(service?: CreationService) {
     catch (error) { fail(res, error); }
   });
 
+  router.post('/requests/:id/world/rp-context', steps, async (req, res) => {
+    try { res.json(await service.worldContext(req.params.id!, bearer(req))); }
+    catch (error) { fail(res, error); }
+  });
+
   /**
    * One x402 resource. Without a payment header it answers 402 with the requirements for this
    * exact request; with one it verifies and settles. Both browser and agent clients use it.
@@ -99,19 +104,27 @@ export function creationRoutes(service?: CreationService) {
   router.post('/requests/:id/payment', steps, async (req, res) => {
     const id = req.params.id!, token = bearer(req);
     const resource = `${req.protocol}://${req.get('host') ?? 'localhost'}/api/creation/requests/${id}/payment`;
-    const header = req.get('x-payment');
+    const header = req.get('payment-signature') ?? req.get('x-payment');
     try {
       if (!header) {
         const issued = await service.requirePayment(id, token, resource);
         if (issued.payment.status === 'SETTLED') { res.json(serialize({ paid: true, request: present(issued.request) })); return; }
-        res.status(402).json(serialize({
-          x402Version: 2, error: 'payment_required', accepts: [service.requirements(issued.payment, resource)],
+        const description = 'Horizon market creation service. This charge is for creation only; Horizon takes no trading fee.';
+        const declaration = {
+          x402Version: 2, error: 'payment_required', resource: { url: resource, description, mimeType: 'application/json' as const },
+          accepts: [await service.requirements(issued.payment)],
           request: present(issued.request),
-        }));
+        };
+        res.setHeader('payment-required', Buffer.from(JSON.stringify(declaration)).toString('base64'));
+        res.status(402).json(serialize(declaration));
         return;
       }
       const settled = await service.submitPayment(id, token, header, resource);
-      if (settled.settlement) res.setHeader('x-payment-response', Buffer.from(JSON.stringify(settled.settlement)).toString('base64'));
+      if (settled.settlement) {
+        const encoded = Buffer.from(JSON.stringify(settled.settlement)).toString('base64');
+        res.setHeader('payment-response', encoded);
+        res.setHeader('x-payment-response', encoded);
+      }
       res.json(serialize({ paid: true, replay: settled.replay, request: present(settled.request) }));
     } catch (error) { fail(res, error); }
   });

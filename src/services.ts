@@ -46,12 +46,16 @@ export function publicConfig(config: Config, services: ReturnType<typeof buildSe
     creation: {
       available: Boolean(config.payments.payTo),
       priceUnits: config.payments.priceUnits.toString(), discountBps: config.payments.discountBps,
-      asset: config.payments.asset, assetDecimals: config.payments.assetDecimals, network: config.payments.network,
+      asset: config.payments.asset === '0.0.0' ? 'HBAR' : config.payments.asset,
+      assetId: config.payments.asset, assetDecimals: config.payments.assetDecimals, network: config.payments.network,
       settlementMode: config.payments.mode, facilitator: services.facilitator.name,
+      walletConnectProjectId: config.payments.walletConnectProjectId ?? null,
       note: 'A one-off x402 charge for the market creation service. It is unrelated to trading, which has no fee.',
     },
     ai: { provider: services.provider.name, mode: services.provider.mode },
-    world: { available: services.verifier.available, access: config.world.access, reason: services.verifier.reason, action: config.world.action, appId: config.world.appId },
+    world: { available: services.verifier.available, widgetAvailable: services.verifier.available && Boolean(config.world.signingKey),
+      access: config.world.access, reason: services.verifier.reason, action: config.world.action, appId: config.world.appId,
+      rpId: config.world.rpId, environment: config.world.environment },
     resolution: { centralized: true, disclosed: true, resolver: services.submitter?.resolver ?? null,
       invalidPayout: '0.5 USDC per outcome token', note: 'A disclosed Horizon admin resolves markets to YES, NO or INVALID with an evidence reference.' },
   };

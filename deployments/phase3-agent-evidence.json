@@ -1,0 +1,30 @@
+{
+  "verifiedAt": "2026-09-09T11:58:49Z",
+  "requestId": "bb649f57-caaa-4ba5-8961-740f602a0746",
+  "requesterKind": "agent",
+  "status": "CREATED",
+  "payment": {
+    "network": "hedera:testnet",
+    "asset": "0.0.0",
+    "symbol": "HBAR",
+    "amountUnits": "100000000",
+    "assetDecimals": 8,
+    "transaction": "0.0.7162784@1788954987.856633335",
+    "consensusTimestamp": "1788954995.023121523",
+    "result": "SUCCESS",
+    "hashscan": "https://hashscan.io/testnet/transaction/0.0.7162784-1788954987-856633335"
+  },
+  "creation": {
+    "network": "eip155:11155111",
+    "market": "0xBC11a878771E75a1C32bfB23A0B40db704F27432",
+    "transaction": "0x465d78fa22ade4503a1693993f947379ecbb6d5601262de284144938a44b7860",
+    "etherscan": "https://sepolia.etherscan.io/tx/0x465d78fa22ade4503a1693993f947379ecbb6d5601262de284144938a44b7860"
+  },
+  "indexing": {
+    "provider": "The Graph",
+    "indexedBlock": 11667798,
+    "marketFound": true,
+    "question": "Will Horizon complete an end-to-end Hedera x402 market creation on Sepolia by 00:00 UTC on September 17, 2026?",
+    "closeAt": 1789603200
+  }
+}

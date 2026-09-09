@@ -34,8 +34,8 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
     if (origin !== config.WEB_ORIGIN) { res.status(403).json({ error: 'origin_not_allowed' }); return; }
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('access-control-allow-credentials', 'true');
-    res.setHeader('access-control-allow-headers', 'content-type, authorization, idempotency-key, x-payment');
-    res.setHeader('access-control-expose-headers', 'x-payment-response');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization, idempotency-key, payment-signature, x-payment');
+    res.setHeader('access-control-expose-headers', 'payment-required, payment-response, x-payment-response');
     res.setHeader('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('vary', 'origin');
     if (req.method === 'OPTIONS') { res.status(204).end(); return; }

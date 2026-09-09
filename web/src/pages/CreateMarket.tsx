@@ -1,9 +1,12 @@
-import { useState } from 'react';
-import { api, ApiError, type CreationRequest, type PaymentRequirements } from '../api';
+import { lazy, Suspense, useState } from 'react';
+import type { RpContext } from '@worldcoin/idkit';
+import { api, ApiError, type CreationRequest, type PaymentRequirements, type PaymentResource } from '../api';
 import { useLocalState } from '../hooks';
 import { useConfig, useWallet } from '../App';
 import { Card, Notice, TxLink, describe } from '../components/Ui';
 import { dateTime, formatUnits } from '../format';
+
+const WorldVerification = lazy(() => import('../components/WorldVerification').then(module => ({ default: module.WorldVerification })));
 
 const STEPS = ['Describe', 'Review draft', 'Verify (optional)', 'Pay', 'Market'] as const;
 type Saved = { id: string; token: string } | null;
@@ -182,6 +185,8 @@ function Verification({ request, saved, busy, act, onVerified, onSkip }: {
 }) {
   const config = useConfig();
   const [proof, setProof] = useState('');
+  const [rpContext, setRpContext] = useState<RpContext | undefined>();
+  const [worldOpen, setWorldOpen] = useState(false);
   return (
     <Card title="Human verification (optional)">
       <p className="small muted">
@@ -193,14 +198,27 @@ function Verification({ request, saved, busy, act, onVerified, onSkip }: {
         ? <Notice kind="warn">
             World Selfie Check is unavailable on this deployment (access: {config.world.access}). {config.world.reason} The standard price applies.
           </Notice>
+        : config.world.widgetAvailable ? <div className="stack">
+            <button className="primary" disabled={busy} onClick={() => void act(() => api.worldContext(saved.id, saved.token)).then(context => {
+              if (context) { setRpContext(context); setWorldOpen(true); }
+            })}>Verify with World</button>
+            {rpContext && <Suspense fallback={<p className="small muted">Loading World verification…</p>}>
+              <WorldVerification open={worldOpen} onOpenChange={setWorldOpen} appId={config.world.appId}
+                action={config.world.action} environment={config.world.environment} requestId={request.id} rpContext={rpContext}
+                onVerify={async result => {
+                  const updated = await api.verify(saved.id, saved.token, result);
+                  onVerified(updated.request);
+                }} />
+            </Suspense>}
+          </div>
         : <div className="field">
-            <label htmlFor="proof">Proof JSON from the World credential flow</label>
+            <label htmlFor="proof">Complete IDKit result JSON from the World Selfie Check flow</label>
             <textarea id="proof" value={proof} onChange={event => setProof(event.target.value)}
-              placeholder='{"nullifierHash":"0x…","merkleRoot":"0x…","proof":"0x…","verificationLevel":"orb"}' />
+              placeholder='{"protocol_version":"3.0","nonce":"…","action":"…","environment":"staging","responses":[{"identifier":"selfie","signal_hash":"0x…","proof":"0x…","merkle_root":"0x…","nullifier":"0x…"}],"user_presence_completed":true}' />
             <div className="hint">The server verifies this proof with World before any discount is applied.</div>
           </div>}
       <div className="row">
-        {config.world.available && (
+        {config.world.available && !config.world.widgetAvailable && (
           <button className="primary" disabled={busy || proof.trim().length < 16} onClick={async () => {
             let parsed: unknown;
             try { parsed = JSON.parse(proof); } catch { return; }
@@ -219,15 +237,17 @@ function Verification({ request, saved, busy, act, onVerified, onSkip }: {
 function Payment({ request, saved, busy, act, onPaid }: { request: CreationRequest; saved: { id: string; token: string }; busy: boolean; act: Act; onPaid: (request: CreationRequest) => void }) {
   const config = useConfig();
   const [requirements, setRequirements] = useState<PaymentRequirements | undefined>();
+  const [resource, setResource] = useState<PaymentResource | undefined>();
   const [authorization, setAuthorization] = useState('');
   const [payer, setPayer] = useState('');
+  const [walletPayer, setWalletPayer] = useState<string | undefined>();
   const [loaded, setLoaded] = useState(false);
 
   if (!loaded) {
     setLoaded(true);
     void act(() => api.requirePayment(saved.id, saved.token)).then(result => {
       if (!result) return;
-      if (result.paid) onPaid(result.request); else setRequirements(result.accepts[0]);
+      if (result.paid) onPaid(result.request); else { setRequirements(result.accepts[0]); setResource(result.resource); }
     });
   }
 
@@ -247,9 +267,10 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
       {!requirements ? <p className="muted small">Requesting payment requirements…</p> : (
         <>
           <dl className="kv">
-            <dt>Amount</dt><dd><strong>{formatUnits(requirements.maxAmountRequired, requirements.extra.assetDecimals)} {requirements.asset}</strong></dd>
+            <dt>Amount</dt><dd><strong>{formatUnits(requirements.amount, requirements.extra.assetDecimals)} {config.creation.asset}</strong></dd>
             <dt>Network</dt><dd>{requirements.network} · scheme {requirements.scheme} · x402 v2</dd>
             <dt>Pay to</dt><dd className="mono">{requirements.payTo}</dd>
+            <dt>Hedera fee payer</dt><dd className="mono">{requirements.extra.feePayer ?? 'unavailable'}</dd>
             <dt>Nonce</dt><dd className="mono">{requirements.extra.nonce}</dd>
             <dt>Facilitator</dt><dd>{config.creation.facilitator} ({requirements.extra.settlementMode})</dd>
             <dt>Discount</dt><dd>{request.discountBps > 0 ? `${request.discountBps / 100}% applied` : 'not applied'} — {request.discountNote}</dd>
@@ -262,25 +283,35 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
                   <input id="payer" value={payer} onChange={event => setPayer(event.target.value)} placeholder="0.0.1234" />
                 </div>
                 <button className="primary" disabled={busy || !/^\d+\.\d+\.\d+$/.test(payer)} onClick={() => void pay(
-                  btoa(JSON.stringify({ x402Version: 2, scheme: 'exact', network: requirements.network, payload: { payer, nonce: requirements.extra.nonce } })),
+                  btoa(JSON.stringify({ x402Version: 2, resource, accepted: requirements, payload: { payer, nonce: requirements.extra.nonce } })),
                 )}>Authorize simulated payment</button>
               </div>
             : <div className="stack">
                 <Notice kind="info">
-                  Horizon never holds your Hedera key. Sign these requirements with your own Hedera wallet or agent client and paste the
-                  resulting base64 <code>X-PAYMENT</code> authorization below. A built-in browser wallet connector is not wired up yet.
+                  Horizon never holds your Hedera key. Your wallet signs a partially signed transfer and Blocky402 adds the advertised fee-payer
+                  signature when it settles the x402 request.
                 </Notice>
+                {config.creation.walletConnectProjectId && resource && (
+                  <button className="primary" disabled={busy} onClick={() => void act(async () => {
+                    const { createHederaPaymentSignature } = await import('../hedera');
+                    const signed = await createHederaPaymentSignature(config.creation.walletConnectProjectId!, resource, requirements);
+                    setWalletPayer(signed.accountId);
+                    const result = await api.pay(saved.id, saved.token, signed.signature);
+                    onPaid(result.request);
+                  })}>Pay with Hedera wallet</button>
+                )}
+                {walletPayer && <p className="small muted">Signed by Hedera account <span className="mono">{walletPayer}</span>.</p>}
                 <details>
-                  <summary className="small">Payment requirements JSON</summary>
+                  <summary className="small">Agent or advanced client payment</summary>
                   <pre className="small scroll"><code>{JSON.stringify(requirements, null, 2)}</code></pre>
+                  <div className="field">
+                    <label htmlFor="authorization">Base64 PAYMENT-SIGNATURE authorization</label>
+                    <textarea id="authorization" value={authorization} onChange={event => setAuthorization(event.target.value)} />
+                  </div>
+                  <button disabled={busy || authorization.trim().length < 16} onClick={() => void pay(authorization.trim())}>
+                    Submit signed payment
+                  </button>
                 </details>
-                <div className="field">
-                  <label htmlFor="authorization">Base64 X-PAYMENT authorization</label>
-                  <textarea id="authorization" value={authorization} onChange={event => setAuthorization(event.target.value)} />
-                </div>
-                <button className="primary" disabled={busy || authorization.trim().length < 16} onClick={() => void pay(authorization.trim())}>
-                  Submit payment
-                </button>
               </div>}
           <p className="small muted" style={{ marginTop: '.75rem' }}>
             An agent client uses the same endpoint: POST this resource without a header to receive the 402 requirements,
