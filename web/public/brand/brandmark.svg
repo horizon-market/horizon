@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="44%" r="65%">
+      <stop offset="0%" stop-color="#0B69C8"/>
+      <stop offset="62%" stop-color="#063A82"/>
+      <stop offset="100%" stop-color="#031B47"/>
+    </radialGradient>
+    <radialGradient id="sun" cx="50%" cy="35%" r="75%">
+      <stop offset="0%" stop-color="#76FFF3"/>
+      <stop offset="55%" stop-color="#1CDDEB"/>
+      <stop offset="100%" stop-color="#04A9EC"/>
+    </radialGradient>
+    <linearGradient id="line" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#32D8F2"/>
+      <stop offset="50%" stop-color="#A8FFF9"/>
+      <stop offset="100%" stop-color="#1FBCF3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Circular brand container -->
+  <circle cx="512" cy="512" r="458" fill="url(#bg)"/>
+
+  <!-- Rising sun -->
+  <path d="M 276 507
+           A 236 236 0 0 1 748 507
+           L 748 507 L 276 507 Z"
+        fill="url(#sun)"/>
+
+  <!-- Horizon -->
+  <rect x="68" y="495" width="888" height="24" rx="12" fill="url(#line)"/>
+
+  <!-- Probability / market waves -->
+  <path d="M 105 665 Q 512 525 919 665"
+        fill="none" stroke="url(#line)" stroke-width="28" stroke-linecap="round"/>
+  <path d="M 167 791 Q 512 621 857 791"
+        fill="none" stroke="url(#line)" stroke-width="28" stroke-linecap="round"/>
+</svg>

@@ -1,6 +1,16 @@
 import type { ReactNode } from 'react';
 import { short } from '../format';
 
+/** The Horizon brandmark. The emblem carries its own dark disc, so it works on both themes. */
+export function Logo({ size = 30, wordmark = true }: { size?: number; wordmark?: boolean }) {
+  return (
+    <span className="logo">
+      <img src="/brand/brandmark.svg" width={size} height={size} alt={wordmark ? '' : 'Horizon'} aria-hidden={wordmark || undefined} />
+      {wordmark && <span className="logo-word">Hori<span>zon</span></span>}
+    </span>
+  );
+}
+
 export function Card({ title, actions, children }: { title?: ReactNode; actions?: ReactNode; children: ReactNode }) {
   return (
     <section className="card">

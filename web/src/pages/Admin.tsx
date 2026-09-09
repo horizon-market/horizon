@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, ApiError, type AdminActivity, type AdminMarket } from '../api';
 import { useAsync } from '../hooks';
-import { Address, Card, Empty, ErrorBox, Loading, Notice, TxLink, describe } from '../components/Ui';
+import { Address, Card, Empty, ErrorBox, Loading, Logo, Notice, TxLink, describe } from '../components/Ui';
 import { dateTime, formatUnits, priceUsdc, shares, usdc } from '../format';
 
 const SHAPES = ['', 'linear', 'quadratic', 'cubic'];
@@ -22,6 +22,7 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <Card title="Operator sign in">
+      <div className="row" style={{ marginBottom: '.75rem' }}><Logo size={40} /></div>
       <p className="small muted">
         The admin panel inspects creation drafts, payments, published curves, trades, background jobs and market
         resolution. Resolution uses the disclosed centralized resolver; every action is recorded in an audit log.

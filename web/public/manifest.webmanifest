@@ -1,0 +1,16 @@
+{
+  "name": "Horizon Prediction Market",
+  "short_name": "Horizon",
+  "description": "Prediction markets with executable pricing curves and zero trading fees.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#031B47",
+  "background_color": "#031B47",
+  "icons": [
+    { "src": "/brand/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/brand/brandmark.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

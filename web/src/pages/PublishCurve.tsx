@@ -3,6 +3,8 @@ import { api, ApiError, type Publication } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
 import { Card, ErrorBox, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { CurveChart } from '../components/CurveChart';
+import { averagePrice, priceAt, totalCost, type CurvePreview, type CurveShape } from '../curve';
 import { parseUnits, priceUsdc, shares as formatShares, usdc, USDC_DECIMALS } from '../format';
 import { approve, confirm, describeWalletError, send } from '../wallet';
 
@@ -43,6 +45,16 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
   }, [form.isBuy]);
 
   const problems = useMemo(() => validate(form), [form]);
+  // The chart mirrors the contract's integral, so what it shades is what the order will post.
+  const curvePreview = useMemo<CurvePreview | undefined>(() => {
+    const startPrice = micro(form.startPrice), endPrice = micro(form.endPrice);
+    if (![startPrice, endPrice].every(price => Number.isInteger(price) && price > 0 && price < 1_000_000)) return undefined;
+    try {
+      const shares = parseUnits(form.size, USDC_DECIMALS);
+      if (shares < 1_000_000n || shares > 10n ** 15n) return undefined;
+      return { isBuy: form.isBuy, startPrice, endPrice, shape: form.shape as CurveShape, shares };
+    } catch { return undefined; }
+  }, [form]);
   const reset = () => { setPrepared(undefined); setTx({ phase: 'idle' }); setError(undefined); };
   const update = (patch: Partial<Form>) => { setForm({ ...form, ...patch }); reset(); };
 
@@ -132,6 +144,21 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
               <div className="hint">{SHAPES.find(shape => shape.value === form.shape)!.hint}</div>
             </div>
           </div>
+          {curvePreview
+            ? <>
+                <CurveChart curve={curvePreview} size={curvePreview.shares} />
+                <div className="chart-readout">
+                  <div><div className="label">Start</div><div className="value">{priceUsdc(curvePreview.startPrice)}</div></div>
+                  <div><div className="label">Half filled</div><div className="value">{priceUsdc(priceAt(curvePreview, 0.5))}</div></div>
+                  <div><div className="label">End</div><div className="value">{priceUsdc(curvePreview.endPrice)}</div></div>
+                  <div><div className="label">Average</div><div className="value">{priceUsdc(averagePrice(curvePreview))}</div></div>
+                  <div>
+                    <div className="label">{form.isBuy ? 'USDC posted' : 'Full-fill proceeds'}</div>
+                    <div className="value">{usdc(totalCost(curvePreview))}</div>
+                  </div>
+                </div>
+              </>
+            : <p className="small muted">Enter valid prices and an amount to preview the curve.</p>}
           {problems.length > 0 && <Notice kind="warn"><ul style={{ margin: 0, paddingLeft: '1.1rem' }}>{problems.map(problem => <li key={problem}>{problem}</li>)}</ul></Notice>}
           {error && <Notice kind="error">{error}</Notice>}
           <div className="row" style={{ marginTop: '.75rem' }}>

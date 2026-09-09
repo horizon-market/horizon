@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api, type AppConfig } from './api';
 import { useAsync, useRoute } from './hooks';
-import { ErrorBox, Loading, Notice } from './components/Ui';
+import { ErrorBox, Loading, Logo, Notice } from './components/Ui';
 import { currentAccount, connect, describeWalletError, walletAvailable } from './wallet';
 import { Markets } from './pages/Markets';
 import { MarketDetail } from './pages/MarketDetail';
@@ -37,7 +37,7 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">Hori<span>zon</span></div>
+        <a className="brand" href="#/" aria-label="Horizon home"><Logo /></a>
         <nav className="nav">
           {LINKS.map(([href, label]) => (
             <a key={href} href={`#${href}`} aria-current={active === href || (href !== '/' && active.startsWith(href)) ? 'page' : undefined}>{label}</a>

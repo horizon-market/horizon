@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import express from 'express';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
@@ -69,7 +69,8 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
 
   const admin = new AdminJS({
     rootPath: '/admin',
-    branding: { companyName: 'Horizon', withMadeWithLove: false },
+    // Served from web/dist by this process, so the panel carries the same brand as the app.
+    branding: { companyName: 'Horizon', withMadeWithLove: false, logo: '/brand/brandmark.svg', favicon: '/favicon.ico' },
     resources: ['CreationRequest', 'PaymentIntent', 'HumanVerification', 'DiscountUsage', 'MarketResolution', 'AdminAudit', 'JobRun'].map(name => ({
       resource: { model: getModelByName(name), client: db },
       options: {
@@ -110,9 +111,21 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
   app.use(admin.options.rootPath, router);
 
   // The built frontend is served by the API when it exists; in development Vite serves it.
+  // Vite's /assets output is content-hashed and may be cached forever. The entry document and the
+  // manifest must not be, or a redeploy keeps serving a stale bundle from the browser cache.
   if (existsSync(WEB_DIST)) {
-    app.use(express.static(WEB_DIST, { index: 'index.html', maxAge: '1h' }));
-    app.get(/^\/(?!api|admin|health).*/, (_req, res) => res.sendFile(resolve(WEB_DIST, 'index.html')));
+    app.use(express.static(WEB_DIST, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || filePath.endsWith('.webmanifest')) res.setHeader('cache-control', 'no-cache');
+        else if (filePath.includes(`${sep}assets${sep}`)) res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+        else res.setHeader('cache-control', 'public, max-age=3600');
+      },
+    }));
+    app.get(/^\/(?!api|admin|health).*/, (_req, res) => {
+      res.setHeader('cache-control', 'no-cache');
+      res.sendFile(resolve(WEB_DIST, 'index.html'));
+    });
   }
 
   app.use((_req, res) => res.status(404).json({ error: 'not_found' }));
