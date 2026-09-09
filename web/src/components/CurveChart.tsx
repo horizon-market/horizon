@@ -31,6 +31,7 @@ export function CurveChart({ curve, size }: { curve: CurvePreview; size: bigint 
     const fraction = index / STEPS;
     return `${index === 0 ? 'M' : 'L'} ${x(fraction).toFixed(2)} ${y(priceAt({ ...curve, shape }, fraction)).toFixed(2)}`;
   }).join(' '), [curve.startPrice, curve.endPrice, y]);
+  const flat = curve.startPrice === curve.endPrice;
   const selected = path(curve.shape);
   const area = `${selected} L ${x(1).toFixed(2)} ${y(0).toFixed(2)} L ${x(0).toFixed(2)} ${y(0).toFixed(2)} Z`;
   const hoverPrice = hover === undefined ? undefined : priceAt(curve, hover);
@@ -38,9 +39,11 @@ export function CurveChart({ curve, size }: { curve: CurvePreview; size: bigint 
   return (
     <figure className="chart">
       <figcaption className="small muted">
-        {curve.isBuy
-          ? 'Your bid falls as the curve fills, so later shares cost you less. The shaded area is the USDC this curve posts.'
-          : 'Your ask rises as inventory leaves, so later shares sell for more. The shaded area is the USDC a full fill returns.'}
+        {flat
+          ? `Every share fills at the same price, so this is a fixed-price limit order. The shaded area is the USDC ${curve.isBuy ? 'this order posts' : 'a full fill returns'}.`
+          : curve.isBuy
+            ? 'Your bid falls as the curve fills, so later shares cost you less. The shaded area is the USDC this curve posts.'
+            : 'Your ask rises as inventory leaves, so later shares sell for more. The shaded area is the USDC a full fill returns.'}
       </figcaption>
       <div className="chart-plot" onPointerLeave={() => setHover(undefined)}
         onPointerMove={event => {
@@ -64,14 +67,14 @@ export function CurveChart({ curve, size }: { curve: CurvePreview; size: bigint 
             </g>
           ))}
           <path fill={`url(#${gradient})`} d={area} />
-          {SHAPES.filter(other => other.shape !== curve.shape).map(other => (
+          {(flat ? [] : SHAPES.filter(other => other.shape !== curve.shape)).map(other => (
             <g key={other.shape}>
               <path className="chart-alt" d={path(other.shape)} />
               <text className="chart-alt-label" x={x(other.at)} y={y(priceAt({ ...curve, shape: other.shape }, other.at)) - 5} textAnchor="middle">{other.label}</text>
             </g>
           ))}
           <path className="chart-line" d={selected} />
-          {SHAPES.filter(other => other.shape === curve.shape).map(other => (
+          {(flat ? [] : SHAPES.filter(other => other.shape === curve.shape)).map(other => (
             <text key={other.shape} className="chart-line-label" x={x(other.at)}
               y={y(priceAt(curve, other.at)) - 7} textAnchor="middle">{other.label}</text>
           ))}

@@ -81,6 +81,31 @@ export class MarketService {
     return { indexedBlock: snapshot.block, positions };
   }
 
+  /**
+   * A maker's own published curves. Indexed state is enough to list and cancel them; a fill still
+   * depends on the wallet balance the curve's Aqua allocation draws on, which is shared.
+   */
+  async curvesFor(maker: Address) {
+    const snapshot = await this.graph.curvesByMaker(maker);
+    const now = Math.floor(Date.now() / 1000);
+    return { indexedBlock: snapshot.block, curves: snapshot.curves.map(curve => {
+      const isYes = (curve.flags & 1) !== 0, isBuy = (curve.flags & 2) !== 0;
+      const remaining = curve.maxShares > curve.filled ? curve.maxShares - curve.filled : 0n;
+      return {
+        orderHash: curve.id, market: curve.market, question: curve.question,
+        side: isYes ? 'YES' : 'NO', direction: isBuy ? 'BUY' : 'SELL', shape: curve.flags >> 2,
+        startPrice: curve.startPrice, endPrice: curve.endPrice,
+        // Equal endpoints never move with the fill, which is what makes them a limit order.
+        isLimit: curve.startPrice === curve.endPrice,
+        maxShares: curve.maxShares.toString(), filled: curve.filled.toString(), remaining: remaining.toString(),
+        active: curve.active, publishedAt: curve.publishedAt, closeAt: curve.closeAt,
+        outcomeToken: isYes ? curve.yesToken : curve.noToken,
+        marketStatus: curve.result !== 0 ? 'RESOLVED' : curve.closeAt <= now ? 'CLOSED' : 'OPEN',
+        cancellable: curve.active && remaining > 0n,
+      };
+    }) };
+  }
+
   private validatePublish(input: PublishInput): Curve {
     if (!Number.isInteger(input.shape) || input.shape < 1 || input.shape > 3) throw new MarketError('invalid_shape');
     for (const price of [input.startPrice, input.endPrice]) {

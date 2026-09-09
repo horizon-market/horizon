@@ -43,6 +43,12 @@ export type Publication = {
   approval: { token: string; spender: string; amount: string };
   transaction: { to: string; data: string; value: string }; fees: Fees;
 };
+export type MakerCurve = {
+  orderHash: string; market: string; question: string; side: 'YES' | 'NO'; direction: 'BUY' | 'SELL';
+  shape: number; startPrice: number; endPrice: number; isLimit: boolean;
+  maxShares: string; filled: string; remaining: string; active: boolean; publishedAt: number; closeAt: number;
+  outcomeToken: string; marketStatus: 'OPEN' | 'CLOSED' | 'RESOLVED'; cancellable: boolean;
+};
 export type Position = { market: string; question: string; closeAt: number; status: string; result: string; yesToken: string; noToken: string; yes: string; no: string; redeemableUsdc: string };
 export type Redemption = { result: string; payoutUsdc: string; transaction: { to: string; data: string; value: string } };
 export type CreationRequest = {
@@ -97,6 +103,7 @@ export const api = {
   markets: () => request<MarketList>('/api/markets'),
   market: (id: string) => request<{ indexedBlock: number; market: Market }>(`/api/markets/${id}`),
   positions: (account: string) => request<{ indexedBlock: number; positions: Position[] }>(`/api/positions/${account}`),
+  makerCurves: (account: string) => request<{ indexedBlock: number; curves: MakerCurve[] }>(`/api/curves/${account}`),
   quote: (input: { market: string; account: string; recipient: string; isYes: boolean; isBuy: boolean; shares: string; slippageBps: number }) => post<Quote>('/api/quotes', input),
   publishCurve: (input: { maker: string; market: string; isYes: boolean; isBuy: boolean; startPrice: number; endPrice: number; shares: string; shape: number }) => post<Publication>('/api/curves', input),
   cancelCurve: (input: { maker: string; market: string; orderHash: string; outcomeToken: string }) => post<{ transaction: { to: string; data: string; value: string } }>('/api/curves/cancellations', input),

@@ -57,6 +57,12 @@ export function tradingRoutes(config?: TradingConfig) {
     if (!account.success) { res.status(400).json({ error: 'invalid_account' }); return; }
     await guard(res, () => markets.positions(account.data));
   });
+  router.get('/curves/:maker', reads, async (req, res) => {
+    if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
+    const maker = address.safeParse(req.params.maker);
+    if (!maker.success) { res.status(400).json({ error: 'invalid_account' }); return; }
+    await guard(res, () => markets.curvesFor(maker.data));
+  });
   router.post('/curves', writes, async (req, res) => {
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     const input = publishSchema.safeParse(req.body);

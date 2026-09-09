@@ -43,6 +43,13 @@ export type OperatorFill = { id: Hex; strategy: Hex; maker: Address; flags: numb
 export type OperatorRoute = { id: Hex; market: Address; question: string; taker: Address; recipient: Address;
   isYes: boolean; isBuy: boolean; shares: bigint; usdc: bigint; fills: number; transaction: Hex; block: number };
 export type IndexedActivity = { block: number; hash: Hex; curves: OperatorCurve[]; fills: OperatorFill[]; routes: OperatorRoute[] };
+const makerMarketRef = z.object({ id: address, question: z.string().max(400), closeAt: integer,
+  result: z.number().int().min(0).max(3), yesToken: address, noToken: address });
+const makerCurvesSchema = z.object({
+  _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }),
+  strategies: z.array(strategySchema.extend({ market: makerMarketRef, filled: integer, active: z.boolean(), publishedAt: integer })).max(100),
+});
+export type MakerCurve = OperatorCurve & { closeAt: number; result: number; yesToken: Address; noToken: Address };
 function toSnapshot(data: z.infer<typeof snapshotSchema>): IndexedSnapshot {
   if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
   return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, markets: data.markets.map(market => ({
@@ -125,6 +132,25 @@ export class GraphProvider {
         transaction: route.transaction as Hex, block: Number(route.block),
       })),
     };
+  }
+  /** Every curve one maker has published, newest first, including cancelled and exhausted ones. */
+  async curvesByMaker(maker: Address, first = 100): Promise<{ block: number; hash: Hex; curves: MakerCurve[] }> {
+    const data = makerCurvesSchema.parse(await this.query(`query MakerCurves($maker: Bytes!, $first: Int!) {
+      _meta { block { number hash } hasIndexingErrors }
+      strategies(first: $first, where: { maker: $maker }, orderBy: publishedAt, orderDirection: desc) {
+        id maker flags startPrice endPrice maxShares salt filled active publishedAt
+        market { id question closeAt result yesToken noToken }
+      }
+    }`, { maker: maker.toLowerCase(), first }));
+    if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
+    return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, curves: data.strategies.map(strategy => ({
+      id: strategy.id as Hex, maker: strategy.maker as Address, market: strategy.market.id as Address,
+      question: strategy.market.question, flags: strategy.flags, startPrice: Number(strategy.startPrice),
+      endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), filled: BigInt(strategy.filled),
+      active: strategy.active, publishedAt: Number(strategy.publishedAt), salt: strategy.salt as Hex,
+      closeAt: Number(strategy.market.closeAt), result: strategy.market.result,
+      yesToken: strategy.market.yesToken as Address, noToken: strategy.market.noToken as Address,
+    })) };
   }
   async markets() {
     return this.query(`{ _meta { block { number hash } hasIndexingErrors } markets(first: 50, orderBy: createdAt, orderDirection: desc) {

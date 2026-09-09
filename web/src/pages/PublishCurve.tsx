@@ -14,14 +14,19 @@ const SHAPES = [
   { value: 3, label: 'Cubic (alpha 3)', hint: 'Price holds near the start longest, then moves sharply.' },
 ];
 
-type Form = { market: string; isYes: boolean; isBuy: boolean; startPrice: string; endPrice: string; size: string; shape: number };
+type OrderType = 'limit' | 'curve';
+type Form = { market: string; type: OrderType; isYes: boolean; isBuy: boolean; startPrice: string; endPrice: string; size: string; shape: number };
 
 export function PublishCurve({ query }: { query: URLSearchParams }) {
   const wallet = useWallet();
   const listing = useAsync(() => api.markets(), []);
-  const [form, setForm] = useState<Form>({
-    market: query.get('market') ?? '', isYes: query.get('side') !== 'no', isBuy: query.get('direction') !== 'sell',
-    startPrice: '0.50', endPrice: '0.40', size: '10', shape: 1,
+  const [form, setForm] = useState<Form>(() => {
+    const type: OrderType = query.get('type') === 'limit' ? 'limit' : 'curve';
+    return {
+      market: query.get('market') ?? '', type, isYes: query.get('side') !== 'no', isBuy: query.get('direction') !== 'sell',
+      // A limit order is the same order with both endpoints equal, so the price never moves.
+      startPrice: '0.50', endPrice: type === 'limit' ? '0.50' : '0.40', size: '10', shape: 1,
+    };
   });
   const [prepared, setPrepared] = useState<Publication | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -35,12 +40,15 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
   }, [listing.data, form.market]);
   useEffect(() => {
     // A buy curve declines as inventory is acquired; a sell curve rises as inventory leaves.
+    // Switching direction reflects the end price across the start price, so the shape the maker
+    // chose survives instead of collapsing into a flat order.
     setForm(current => {
+      if (current.type === 'limit') return current;
       const start = Number(current.startPrice), end = Number(current.endPrice);
       if (Number.isNaN(start) || Number.isNaN(end)) return current;
-      if (current.isBuy && end > start) return { ...current, endPrice: current.startPrice };
-      if (!current.isBuy && end < start) return { ...current, endPrice: current.startPrice };
-      return current;
+      if (current.isBuy === (end <= start)) return current;
+      const reflected = Math.min(0.999999, Math.max(0.000001, start * 2 - end));
+      return { ...current, endPrice: reflected.toFixed(6).replace(/0+$/, '').replace(/\.$/, '') };
     });
   }, [form.isBuy]);
 
@@ -56,7 +64,13 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
     } catch { return undefined; }
   }, [form]);
   const reset = () => { setPrepared(undefined); setTx({ phase: 'idle' }); setError(undefined); };
-  const update = (patch: Partial<Form>) => { setForm({ ...form, ...patch }); reset(); };
+  const update = (patch: Partial<Form>) => {
+    const next = { ...form, ...patch };
+    // Equal endpoints on the linear preset are exactly what the contract treats as a limit order.
+    if (next.type === 'limit') { next.endPrice = next.startPrice; next.shape = 1; }
+    setForm(next);
+    reset();
+  };
 
   const preview = async () => {
     setError(undefined); setPrepared(undefined); setTx({ phase: 'idle' });
@@ -94,12 +108,12 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
 
   return (
     <div className="stack">
-      <h1>Publish a curve</h1>
+      <h1>{form.type === 'limit' ? 'Place a limit order' : 'Publish a curve'}</h1>
       <Notice kind="ok">
-        <strong>0% trading fees.</strong> Publishing and filling a curve costs nothing beyond network gas.
+        <strong>0% trading fees.</strong> Publishing and filling an order costs nothing beyond network gas.
       </Notice>
       <div className="split">
-        <Card title="Curve">
+        <Card title={form.type === 'limit' ? 'Limit order' : 'Curve'}>
           {open.length === 0 && <Notice kind="warn">No open markets are indexed yet.</Notice>}
           <div className="field">
             <label htmlFor="market">Market</label>
@@ -108,50 +122,73 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
               {open.map(market => <option key={market.id} value={market.id}>{market.question}</option>)}
             </select>
           </div>
+          <div className="field">
+            <label>Order type</label>
+            <div className="row">
+              <button className={form.type === 'limit' ? 'primary' : ''} onClick={() => update({ type: 'limit' })}>Limit order</button>
+              <button className={form.type === 'curve' ? 'primary' : ''} onClick={() => update({ type: 'curve', endPrice: form.isBuy ? '0.40' : '0.60' })}>Pricing curve</button>
+            </div>
+            <div className="hint">
+              {form.type === 'limit'
+                ? 'One fixed price for every share. It is a curve whose start and end prices are equal, so nothing moves as it fills.'
+                : 'A price that moves as the order fills, so you take a better average than a single price would give you.'}
+            </div>
+          </div>
           <div className="row" style={{ marginBottom: '.75rem' }}>
             <button className={form.isYes ? 'yes' : ''} onClick={() => update({ isYes: true })}>YES</button>
             <button className={!form.isYes ? 'no' : ''} onClick={() => update({ isYes: false })}>NO</button>
             <span style={{ flex: 1 }} />
-            <button className={form.isBuy ? 'primary' : ''} onClick={() => update({ isBuy: true })}>Buy curve</button>
-            <button className={!form.isBuy ? 'primary' : ''} onClick={() => update({ isBuy: false })}>Sell curve</button>
+            <button className={form.isBuy ? 'primary' : ''} onClick={() => update({ isBuy: true })}>Buy</button>
+            <button className={!form.isBuy ? 'primary' : ''} onClick={() => update({ isBuy: false })}>Sell</button>
           </div>
           <Notice kind="info">
             {form.isBuy
-              ? `A buy curve posts USDC to acquire ${form.isYes ? 'YES' : 'NO'}. Its price declines as it fills, and it also funds complementary minting for a trader buying the opposite outcome.`
-              : `A sell curve offers ${form.isYes ? 'YES' : 'NO'} you already hold. Its price rises as inventory leaves. This is the explicit step that turns holdings into public liquidity.`}
+              ? `A buy ${form.type === 'limit' ? 'order' : 'curve'} posts USDC to acquire ${form.isYes ? 'YES' : 'NO'}${form.type === 'limit' ? ' at one price' : '. Its price declines as it fills'}, and it also funds complementary minting for a trader buying the opposite outcome.`
+              : `A sell ${form.type === 'limit' ? 'order' : 'curve'} offers ${form.isYes ? 'YES' : 'NO'} you already hold${form.type === 'limit' ? ' at one price' : '. Its price rises as inventory leaves'}. This is the explicit step that turns holdings into public liquidity.`}
           </Notice>
           <div className="fields" style={{ marginTop: '.75rem' }}>
             <div className="field">
-              <label htmlFor="start">Start price (USDC per share)</label>
+              <label htmlFor="start">{form.type === 'limit' ? 'Limit price (USDC per share)' : 'Start price (USDC per share)'}</label>
               <input id="start" inputMode="decimal" value={form.startPrice} onChange={event => update({ startPrice: event.target.value })} />
               <div className="hint">{describePrice(form.startPrice)}</div>
             </div>
-            <div className="field">
-              <label htmlFor="end">End price (USDC per share)</label>
-              <input id="end" inputMode="decimal" value={form.endPrice} onChange={event => update({ endPrice: event.target.value })} />
-              <div className="hint">{form.startPrice === form.endPrice ? 'Equal endpoints: a fixed-price limit order.' : describePrice(form.endPrice)}</div>
-            </div>
+            {form.type === 'curve' && (
+              <div className="field">
+                <label htmlFor="end">End price (USDC per share)</label>
+                <input id="end" inputMode="decimal" value={form.endPrice} onChange={event => update({ endPrice: event.target.value })} />
+                <div className="hint">{form.startPrice === form.endPrice ? 'Equal to the start price: this is a limit order.' : describePrice(form.endPrice)}</div>
+              </div>
+            )}
             <div className="field">
               <label htmlFor="amount">Amount (shares)</label>
               <input id="amount" inputMode="decimal" value={form.size} onChange={event => update({ size: event.target.value })} />
               <div className="hint">Minimum 1 share.</div>
             </div>
-            <div className="field">
-              <label htmlFor="shape">Curve shape</label>
-              <select id="shape" value={form.shape} onChange={event => update({ shape: Number(event.target.value) })}>
-                {SHAPES.map(shape => <option key={shape.value} value={shape.value}>{shape.label}</option>)}
-              </select>
-              <div className="hint">{SHAPES.find(shape => shape.value === form.shape)!.hint}</div>
-            </div>
+            {form.type === 'curve' && (
+              <div className="field">
+                <label htmlFor="shape">Curve shape</label>
+                <select id="shape" value={form.shape} onChange={event => update({ shape: Number(event.target.value) })}>
+                  {SHAPES.map(shape => <option key={shape.value} value={shape.value}>{shape.label}</option>)}
+                </select>
+                <div className="hint">{SHAPES.find(shape => shape.value === form.shape)!.hint}</div>
+              </div>
+            )}
           </div>
           {curvePreview
             ? <>
                 <CurveChart curve={curvePreview} size={curvePreview.shares} />
                 <div className="chart-readout">
-                  <div><div className="label">Start</div><div className="value">{priceUsdc(curvePreview.startPrice)}</div></div>
-                  <div><div className="label">Half filled</div><div className="value">{priceUsdc(priceAt(curvePreview, 0.5))}</div></div>
-                  <div><div className="label">End</div><div className="value">{priceUsdc(curvePreview.endPrice)}</div></div>
-                  <div><div className="label">Average</div><div className="value">{priceUsdc(averagePrice(curvePreview))}</div></div>
+                  {form.type === 'limit'
+                    ? <>
+                        <div><div className="label">Price</div><div className="value">{priceUsdc(curvePreview.startPrice)}</div></div>
+                        <div><div className="label">Shares</div><div className="value">{formatShares(curvePreview.shares)}</div></div>
+                      </>
+                    : <>
+                        <div><div className="label">Start</div><div className="value">{priceUsdc(curvePreview.startPrice)}</div></div>
+                        <div><div className="label">Half filled</div><div className="value">{priceUsdc(priceAt(curvePreview, 0.5))}</div></div>
+                        <div><div className="label">End</div><div className="value">{priceUsdc(curvePreview.endPrice)}</div></div>
+                        <div><div className="label">Average</div><div className="value">{priceUsdc(averagePrice(curvePreview))}</div></div>
+                      </>}
                   <div>
                     <div className="label">{form.isBuy ? 'USDC posted' : 'Full-fill proceeds'}</div>
                     <div className="value">{usdc(totalCost(curvePreview))}</div>
@@ -162,7 +199,9 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
           {problems.length > 0 && <Notice kind="warn"><ul style={{ margin: 0, paddingLeft: '1.1rem' }}>{problems.map(problem => <li key={problem}>{problem}</li>)}</ul></Notice>}
           {error && <Notice kind="error">{error}</Notice>}
           <div className="row" style={{ marginTop: '.75rem' }}>
-            <button className="primary" disabled={busy || problems.length > 0} onClick={() => void preview()}>{busy ? 'Preparing…' : 'Review curve'}</button>
+            <button className="primary" disabled={busy || problems.length > 0} onClick={() => void preview()}>
+              {busy ? 'Preparing…' : form.type === 'limit' ? 'Review limit order' : 'Review curve'}
+            </button>
             {!wallet.account && <button onClick={() => void wallet.connect()}>Connect wallet</button>}
           </div>
         </Card>
@@ -171,8 +210,9 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
             ? <p className="muted small">Fill in the curve and choose <em>Review curve</em>. Horizon rebuilds the canonical order through the deployed router and checks your balance and allowance before anything is signed.</p>
             : <div className="stack">
                 <dl className="kv">
-                  <dt>Direction</dt><dd>{form.isBuy ? 'BUY' : 'SELL'} {form.isYes ? 'YES' : 'NO'}</dd>
-                  <dt>Prices</dt><dd>{priceUsdc(prepared.strategy.startPrice)} → {priceUsdc(prepared.strategy.endPrice)}</dd>
+                  <dt>Order</dt><dd>{form.isBuy ? 'BUY' : 'SELL'} {form.isYes ? 'YES' : 'NO'} · {form.type === 'limit' ? 'limit order' : 'pricing curve'}</dd>
+                  <dt>{form.type === 'limit' ? 'Price' : 'Prices'}</dt>
+                  <dd>{form.type === 'limit' ? priceUsdc(prepared.strategy.startPrice) : `${priceUsdc(prepared.strategy.startPrice)} → ${priceUsdc(prepared.strategy.endPrice)}`}</dd>
                   <dt>Size</dt><dd>{formatShares(prepared.strategy.maxShares)} shares</dd>
                   <dt>{form.isBuy ? 'USDC budget' : 'Outcome tokens posted'}</dt>
                   <dd>{form.isBuy ? usdc(prepared.amounts[1]!) : `${formatShares(prepared.amounts[0]!)} ${form.isYes ? 'YES' : 'NO'}`}</dd>
@@ -191,7 +231,7 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
                     </button>
                   )}
                   <button className="primary" disabled={prepared.readiness !== 'ready' || tx.phase === 'signing' || tx.phase === 'pending'} onClick={() => void run('publish')}>
-                    Publish curve
+                    {form.type === 'limit' ? 'Place limit order' : 'Publish curve'}
                   </button>
                 </div>
                 <p className="small muted">

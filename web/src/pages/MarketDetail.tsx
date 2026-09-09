@@ -51,7 +51,7 @@ export function MarketDetail({ market }: { market: string }) {
       <div className="split">
         <Curves market={market} curves={data.curves} />
         {data.status === 'OPEN'
-          ? <OrderTicket market={market} onDone={detail.reload} />
+          ? <OrderTicket market={market} hasCurves={data.curves.length > 0} onDone={detail.reload} />
           : <Card title="Trading closed"><p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Holdings</a>.</p></Card>}
       </div>
     </div>
@@ -94,12 +94,12 @@ function Curves({ market, curves }: { market: string; curves: Curve[] }) {
 
 type Ticket = { isYes: boolean; isBuy: boolean; size: string; slippageBps: number };
 
-function OrderTicket({ market, onDone }: { market: string; onDone: () => void }) {
+function OrderTicket({ market, hasCurves, onDone }: { market: string; hasCurves: boolean; onDone: () => void }) {
   const wallet = useWallet();
   const [ticket, setTicket] = useState<Ticket>({ isYes: true, isBuy: true, size: '1', slippageBps: 50 });
   const [quote, setQuote] = useState<Quote | undefined>();
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | undefined>();
+  const [error, setError] = useState<{ code: string; message: string } | undefined>();
   const [tx, setTx] = useState<TxState>({ phase: 'idle' });
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => { const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000); return () => clearInterval(timer); }, []);
@@ -111,14 +111,16 @@ function OrderTicket({ market, onDone }: { market: string; onDone: () => void })
 
   const requestQuote = async () => {
     setError(undefined); setQuote(undefined); setTx({ phase: 'idle' });
-    if (!wallet.account) { setError('Connect a wallet to price an order against your balances.'); return; }
+    if (!wallet.account) { setError({ code: 'wallet', message: 'Connect a wallet to price an order against your balances.' }); return; }
     if (sizeError) return;
     setPending(true);
     try {
       setQuote(await api.quote({ market, account: wallet.account, recipient: wallet.account, isYes: ticket.isYes, isBuy: ticket.isBuy,
         shares: parseUnits(ticket.size, USDC_DECIMALS).toString(), slippageBps: ticket.slippageBps }));
     } catch (issue) {
-      setError(issue instanceof ApiError ? describeQuoteError(issue.code) : issue instanceof Error ? issue.message : 'Quote failed.');
+      setError(issue instanceof ApiError
+        ? { code: issue.code, message: describeQuoteError(issue.code) }
+        : { code: 'unknown', message: issue instanceof Error ? issue.message : 'Quote failed.' });
     } finally { setPending(false); }
   };
 
@@ -169,7 +171,12 @@ function OrderTicket({ market, onDone }: { market: string; onDone: () => void })
         </button>
         {!wallet.account && <button onClick={() => void wallet.connect()}>Connect wallet</button>}
       </div>
-      {error && <Notice kind="error">{error}</Notice>}
+      {error && (error.code === 'quote_unavailable_refresh_or_check_liquidity'
+        ? <NoLiquidity market={market} ticket={ticket} reason="No published curve can fill that order right now." />
+        : <Notice kind="error">{error.message}</Notice>)}
+      {!hasCurves && !error && !quote && (
+        <NoLiquidity market={market} ticket={ticket} reason="Nobody has published liquidity in this market yet, so there is nothing to quote against." />
+      )}
       {quote && <QuoteView quote={quote} ticket={ticket} expired={expired} secondsLeft={quote.deadline - now} tx={tx} onRun={run} onRequote={() => void requestQuote()} />}
     </Card>
   );
@@ -206,6 +213,31 @@ function QuoteView({ quote, ticket, expired, secondsLeft, tx, onRun, onRequote }
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * A market with no executable curve is a normal state, not a failure. The useful next step is to
+ * publish the liquidity yourself, at prices you choose, so the invitation names that directly.
+ */
+function NoLiquidity({ market, ticket, reason }: { market: string; ticket: Ticket; reason: string }) {
+  const side = ticket.isYes ? 'yes' : 'no';
+  const direction = ticket.isBuy ? 'buy' : 'sell';
+  return (
+    <Notice kind="warn">
+      <p style={{ margin: '0 0 .5rem' }}>
+        {reason} You can publish your own {ticket.isBuy ? 'bid' : 'offer'} for {ticket.isYes ? 'YES' : 'NO'} and wait for a counterparty,
+        instead of taking someone else's price.
+      </p>
+      <div className="row">
+        <a className="button" href={`#/publish?market=${market}&side=${side}&direction=${direction}&type=limit`}>
+          Place a limit order
+        </a>
+        <a className="button" href={`#/publish?market=${market}&side=${side}&direction=${direction}`}>
+          Publish a curve
+        </a>
+      </div>
+    </Notice>
   );
 }
 
