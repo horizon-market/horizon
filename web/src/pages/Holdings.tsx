@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, ApiError, type MakerCurve, type Position } from '../api';
 import { navigate, useAsync, type Async } from '../hooks';
 import { useWallet } from '../App';
-import { Badge, Card, Empty, ErrorBox, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { Card, Empty, ErrorBox, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
 import { cumulative, type CurveShape } from '../curve';
 import { dateTime, priceUsdc, shares, timeLeft, usdc } from '../format';
 import { confirm, describeWalletError, send } from '../wallet';
@@ -161,10 +161,28 @@ function Summary({ held, published }: { held: Position[]; published: MakerCurve[
 
 function Positions({ held, account, onDone }: { held: Position[]; account: string; onDone: () => void }) {
   const [filter, setFilter] = useState<PositionState | 'all'>('all');
+  const [busy, setBusy] = useState<string | undefined>();
+  const [tx, setTx] = useState<TxState>({ phase: 'idle' });
+  const [error, setError] = useState<string | undefined>();
   const counts = tally(held, positionState);
   const visible = held
     .filter(position => filter === 'all' || positionState(position) === filter)
     .sort((a, b) => POSITION_ORDER.indexOf(positionState(a)) - POSITION_ORDER.indexOf(positionState(b)));
+
+  const redeem = async (position: Position) => {
+    setError(undefined); setBusy(position.market); setTx({ phase: 'signing' });
+    try {
+      const prepared = await api.redeem({ account, market: position.market, recipient: account, yesShares: position.yes, noShares: position.no });
+      const hash = await send(account, prepared.transaction);
+      setTx({ phase: 'pending', hash });
+      const status = await confirm(account, hash);
+      setTx(status === 'success' ? { phase: 'confirmed', hash } : { phase: 'error', hash, message: 'The redemption reverted.' });
+      if (status === 'success') onDone();
+    } catch (issue) {
+      if (issue instanceof ApiError) { setError(describe(issue.code)); setTx({ phase: 'idle' }); }
+      else setTx({ phase: 'error', message: describeWalletError(issue) });
+    } finally { setBusy(undefined); }
+  };
 
   if (held.length === 0) {
     return (
@@ -181,63 +199,55 @@ function Positions({ held, account, onDone }: { held: Position[]; account: strin
         sell order when you want to sell.
       </Notice>
       <Filters options={POSITION_FILTERS} counts={counts} value={filter} onChange={setFilter} />
-      {visible.length === 0
-        ? <Empty title={`No ${POSITION_STATES[filter as PositionState].label.toLowerCase()} positions`} />
-        : <div className="grid">{visible.map(position =>
-            <PositionCard key={position.market} position={position} account={account} onDone={onDone} />)}</div>}
-    </div>
-  );
-}
-
-function PositionCard({ position, account, onDone }: { position: Position; account: string; onDone: () => void }) {
-  const [tx, setTx] = useState<TxState>({ phase: 'idle' });
-  const [error, setError] = useState<string | undefined>();
-  const state = positionState(position);
-  const meta = POSITION_STATES[state];
-  const busy = tx.phase === 'signing' || tx.phase === 'pending';
-
-  const redeem = async () => {
-    setError(undefined); setTx({ phase: 'signing' });
-    try {
-      const prepared = await api.redeem({ account, market: position.market, recipient: account, yesShares: position.yes, noShares: position.no });
-      const hash = await send(account, prepared.transaction);
-      setTx({ phase: 'pending', hash });
-      const status = await confirm(account, hash);
-      setTx(status === 'success' ? { phase: 'confirmed', hash } : { phase: 'error', hash, message: 'The redemption reverted.' });
-      if (status === 'success') onDone();
-    } catch (issue) {
-      if (issue instanceof ApiError) { setError(describe(issue.code)); setTx({ phase: 'idle' }); return; }
-      setTx({ phase: 'error', message: describeWalletError(issue) });
-    }
-  };
-
-  return (
-    <Card>
-      <div className="row between">
-        <Badge kind={meta.badge}>{state === 'settled' || state === 'redeemable' ? `${meta.label} · ${position.result}` : meta.label}</Badge>
-        <span className="small muted">{position.status === 'OPEN' ? timeLeft(position.closeAt) : dateTime(position.closeAt)}</span>
-      </div>
-      <h3 style={{ marginTop: 'var(--space-2)' }}><a href={`#/markets/${position.market}`}>{position.question}</a></h3>
-      <p className="small muted">{meta.hint}</p>
-      <dl className="kv">
-        <dt>YES</dt><dd>{shares(position.yes)}</dd>
-        <dt>NO</dt><dd>{shares(position.no)}</dd>
-        {position.status === 'RESOLVED' && (
-          <><dt>Payout</dt><dd>{usdc(position.redeemableUsdc)}{position.result === 'INVALID' && <span className="muted"> · INVALID pays 0.5 USDC per token</span>}</dd></>
-        )}
-      </dl>
       {error && <Notice kind="error">{error}</Notice>}
       <TransactionState state={tx} />
-      <div className="row" style={{ marginTop: 'var(--space-2)' }}>
-        {state === 'redeemable' && (
-          <button className="primary" disabled={busy} onClick={() => void redeem()}>
-            {busy ? 'Redeeming…' : `Redeem ${usdc(position.redeemableUsdc)}`}
-          </button>
-        )}
-        {state === 'open' && <a className="button" href={`#/markets/${position.market}`}>Trade</a>}
-        {state !== 'open' && <a className="button" href={`#/markets/${position.market}`}>View market</a>}
-      </div>
-    </Card>
+      {visible.length === 0
+        ? <Empty title={`No ${POSITION_STATES[filter as PositionState].label.toLowerCase()} positions`} />
+        : <Card>
+            <div className="scroll">
+              <table>
+                <thead><tr><th>Market</th><th>YES</th><th>NO</th><th>Payout</th><th>Status</th><th /></tr></thead>
+                <tbody>
+                  {visible.map(position => {
+                    const state = positionState(position);
+                    const meta = POSITION_STATES[state];
+                    const resolved = position.status === 'RESOLVED';
+                    return (
+                      <tr key={position.market}>
+                        <td>
+                          <a href={`#/markets/${position.market}`}>{position.question}</a>
+                          <div className="small muted">{position.status === 'OPEN' ? timeLeft(position.closeAt) : dateTime(position.closeAt)}</div>
+                        </td>
+                        <td className="small">{shares(position.yes)}</td>
+                        <td className="small">{shares(position.no)}</td>
+                        <td className="small">
+                          {resolved ? usdc(position.redeemableUsdc) : <span className="muted">—</span>}
+                          {position.result === 'INVALID' && <div className="muted">0.5 USDC per token</div>}
+                        </td>
+                        <td>
+                          <span className={`badge ${meta.badge}`} title={meta.hint}>{meta.label}</span>
+                          {resolved && <div className="small muted">resolved {position.result}</div>}
+                        </td>
+                        <td>
+                          {state === 'redeemable'
+                            ? <button className="primary" disabled={busy !== undefined} onClick={() => void redeem(position)}>
+                                {busy === position.market ? 'Redeeming…' : 'Redeem'}
+                              </button>
+                            : <a className="button" href={`#/markets/${position.market}`}>{state === 'open' ? 'Trade' : 'View'}</a>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="small muted" style={{ marginTop: 'var(--space-2)' }}>
+              Open means the market is still trading. Awaiting result means trading has closed and the
+              disclosed resolver has not submitted one yet. Redeeming burns the tokens and pays out the
+              collateral behind them; INVALID pays 0.5 USDC per outcome token.
+            </p>
+          </Card>}
+    </div>
   );
 }
 
