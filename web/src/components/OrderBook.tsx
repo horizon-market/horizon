@@ -1,24 +1,20 @@
 import type { BookLevel, OutcomeBook } from '../api';
-import { price as percent, priceUsdc, shares } from '../format';
+import { USDC_DECIMALS, formatUnits, price as percent, priceUsdc, shares } from '../format';
 
 /**
- * One ladder for the selected outcome. Orders on the other outcome are restated here at
- * `1 - price`: a resting buy of the other side is an ask for this one, and a resting sell of it
- * is a bid. Levels that would need sell-and-merge routing are marked, because this release
- * cannot fill them.
+ * One ladder for the outcome chosen in the order ticket; this component has no selector of its
+ * own. Orders on the other outcome are restated here at `1 - price`: a resting buy of the other
+ * side is an ask for this one, and a resting sell of it is a bid. Levels that would need
+ * sell-and-merge routing are marked, because this release cannot fill them.
  */
-export function OrderBook({ book, isYes, onSelect }: { book: OutcomeBook; isYes: boolean; onSelect: (isYes: boolean) => void }) {
+export function OrderBook({ book, isYes }: { book: OutcomeBook; isYes: boolean }) {
   const deepest = Math.max(1, ...[...book.asks, ...book.bids].map(level => Number(BigInt(level.shares))));
   const deferred = [...book.asks, ...book.bids].some(level => !level.executable);
   const outcome = isYes ? 'YES' : 'NO';
   return (
     <div className="stack">
-      <div className="seg">
-        <button className={isYes ? 'active' : ''} onClick={() => onSelect(true)}>YES</button>
-        <button className={!isYes ? 'active' : ''} onClick={() => onSelect(false)}>NO</button>
-      </div>
       <div className="book-head small muted">
-        <span>Price ({outcome})</span><span className="right">Shares</span><span className="right">Orders</span>
+        <span>Price ({outcome})</span><span className="right">Shares</span><span className="right">Total</span>
       </div>
       <div className="ladder">
         {book.asks.length === 0
@@ -42,14 +38,25 @@ export function OrderBook({ book, isYes, onSelect }: { book: OutcomeBook; isYes:
   );
 }
 
+/**
+ * Total is what this one level is worth: its price times the shares resting at it. The number of
+ * orders behind a level moved into the row's tooltip, where it belongs — it never decided anything.
+ */
+const levelTotal = (level: BookLevel) =>
+  formatUnits(BigInt(level.shares) * BigInt(level.price) / 1_000_000n, USDC_DECIMALS);
+
 function Level({ level, kind, deepest }: { level: BookLevel; kind: 'ask' | 'bid'; deepest: number }) {
   const width = `${Math.min(100, (Number(BigInt(level.shares)) / deepest) * 100)}%`;
   return (
-    <div className={`level ${kind}${level.executable ? '' : ' deferred'}`} title={`${level.orders} order${level.orders === 1 ? '' : 's'} · ${level.source}`}>
+    <div className={`level ${kind}${level.executable ? '' : ' deferred'}`}
+      title={`${shares(level.shares)} at ${priceUsdc(level.price)} · ${level.orders} order${level.orders === 1 ? '' : 's'} · ${level.source}`}>
       <span className="depth" style={{ width }} />
-      <span className="price">{priceUsdc(level.price)}</span>
+      <span className="price">
+        {priceUsdc(level.price)}
+        {!level.executable && <span className="flag">merge</span>}
+      </span>
       <span className="right">{shares(level.shares)}</span>
-      <span className="right muted">{level.executable ? level.orders : 'merge'}</span>
+      <span className="right">{levelTotal(level)}</span>
     </div>
   );
 }

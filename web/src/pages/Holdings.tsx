@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api, ApiError, type MakerCurve, type Position } from '../api';
 import { navigate, useAsync, type Async } from '../hooks';
 import { useWallet } from '../App';
-import { Card, Empty, ErrorBox, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { Card, Empty, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { ORDER_STATES, orderState, useCancelCurve, type OrderState } from '../orders';
 import { cumulative, type CurveShape } from '../curve';
 import { dateTime, priceUsdc, shares, timeLeft, usdc } from '../format';
 import { confirm, describeWalletError, send } from '../wallet';
@@ -14,19 +15,12 @@ import { confirm, describeWalletError, send } from '../wallet';
  */
 
 type PositionState = 'open' | 'awaiting' | 'redeemable' | 'settled';
-type OrderState = 'open' | 'filled' | 'closed';
 
 const POSITION_STATES: Record<PositionState, { label: string; badge: 'open' | 'warn' | 'resolved' | 'closed'; hint: string }> = {
   open: { label: 'Open', badge: 'open', hint: 'Trading is still open in this market.' },
   awaiting: { label: 'Awaiting result', badge: 'warn', hint: 'Trading has closed. The disclosed resolver has not submitted a result yet.' },
   redeemable: { label: 'Redeemable', badge: 'resolved', hint: 'Resolved in your favour. Redeem to burn the tokens and take the collateral.' },
   settled: { label: 'No payout', badge: 'closed', hint: 'Resolved against this holding, so it pays nothing.' },
-};
-
-const ORDER_STATES: Record<OrderState, { label: string; badge: 'open' | 'resolved' | 'closed' }> = {
-  open: { label: 'Open', badge: 'open' },
-  filled: { label: 'Filled', badge: 'resolved' },
-  closed: { label: 'Closed', badge: 'closed' },
 };
 
 const POSITION_FILTERS: [PositionState | 'all', string][] = [
@@ -44,11 +38,6 @@ function positionState(position: Position): PositionState {
   if (position.status === 'OPEN') return 'open';
   if (position.status !== 'RESOLVED') return 'awaiting';
   return BigInt(position.redeemableUsdc) > 0n ? 'redeemable' : 'settled';
-}
-
-function orderState(curve: MakerCurve): OrderState {
-  if (BigInt(curve.remaining) === 0n) return 'filled';
-  return curve.active ? 'open' : 'closed';
 }
 
 /**
@@ -253,28 +242,11 @@ function Positions({ held, account, onDone }: { held: Position[]; account: strin
 
 function Orders({ published, account, onDone }: { published: MakerCurve[]; account: string; onDone: () => void }) {
   const [filter, setFilter] = useState<OrderState | 'all'>('open');
-  const [busy, setBusy] = useState<string | undefined>();
-  const [tx, setTx] = useState<TxState>({ phase: 'idle' });
-  const [error, setError] = useState<string | undefined>();
+  const { cancel, busy, tx, error } = useCancelCurve(account, onDone);
   const counts = tally(published, orderState);
   const visible = published
     .filter(curve => filter === 'all' || orderState(curve) === filter)
     .sort((a, b) => ORDER_ORDER.indexOf(orderState(a)) - ORDER_ORDER.indexOf(orderState(b)) || b.publishedAt - a.publishedAt);
-
-  const cancel = async (curve: MakerCurve) => {
-    setError(undefined); setBusy(curve.orderHash); setTx({ phase: 'signing' });
-    try {
-      const prepared = await api.cancelCurve({ maker: account, market: curve.market, orderHash: curve.orderHash, outcomeToken: curve.outcomeToken });
-      const hash = await send(account, prepared.transaction);
-      setTx({ phase: 'pending', hash });
-      const status = await confirm(account, hash);
-      setTx(status === 'success' ? { phase: 'confirmed', hash } : { phase: 'error', hash, message: 'The cancellation reverted.' });
-      if (status === 'success') onDone();
-    } catch (issue) {
-      if (issue instanceof ApiError) { setError(describe(issue.code)); setTx({ phase: 'idle' }); }
-      else setTx({ phase: 'error', message: describeWalletError(issue) });
-    } finally { setBusy(undefined); }
-  };
 
   if (published.length === 0) {
     return (
@@ -333,17 +305,6 @@ function Orders({ published, account, onDone }: { published: MakerCurve[]; accou
               shared with your other markets.
             </p>
           </Card>}
-    </div>
-  );
-}
-
-/** How far an order has filled, so a part-filled row reads at a glance rather than by arithmetic. */
-function Fill({ filled, total }: { filled: string; total: string }) {
-  const size = BigInt(total);
-  const percent = size === 0n ? 0 : Number((BigInt(filled) * 100n) / size);
-  return (
-    <div className="fill" title={`${percent}% filled`}>
-      <span style={{ width: `${Math.min(100, percent)}%` }} />
     </div>
   );
 }

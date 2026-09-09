@@ -38,7 +38,7 @@ Strict, and stated precisely so it does not contradict itself:
 
 Outcome identity never depends on colour alone. In the ladder, ask and bid are separated by
 position and by the spread row; a level that cannot be filled in this release carries the literal
-label `merge` in its last column as well as a muted, dotted-underlined price. Deferred rows do
+label `merge` beside its price as well as a muted, dotted-underlined price. Deferred rows do
 **not** use opacity — that would drop them below the contrast minimum.
 
 ## Palette

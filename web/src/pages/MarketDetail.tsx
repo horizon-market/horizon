@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, type Market, type Publication, type Quote } from '../api';
+import { api, ApiError, type MakerCurve, type Market, type Position, type Publication, type Quote } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
-import { Address, Badge, Card, ErrorBox, Loading, Notice, TransactionState, ZeroFee, describe, type TxState } from '../components/Ui';
+import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState, ZeroFee, describe, type TxState } from '../components/Ui';
+import { isLive, useCancelCurve } from '../orders';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
 import { OrderBook } from '../components/OrderBook';
 import { approve, confirm, describeWalletError, send } from '../wallet';
@@ -11,15 +12,25 @@ const RESULTS = ['Unresolved', 'YES', 'NO', 'INVALID'];
 
 export function MarketDetail({ market }: { market: string }) {
   const detail = useAsync(() => api.market(market), [market]);
+  const account = useWallet().account;
+  // What this account already has in this market: the orders it is resting here, and the outcome
+  // tokens it holds. Both come from endpoints that cover every market, filtered to this one.
+  const mine = useAsync(async () => {
+    if (!account) return { orders: [] as MakerCurve[], position: undefined as Position | undefined };
+    const [published, held] = await Promise.all([api.makerCurves(account), api.positions(account)]);
+    const here = (id: string) => id.toLowerCase() === market.toLowerCase();
+    return { orders: published.curves.filter(curve => here(curve.market)), position: held.positions.find(p => here(p.market)) };
+  }, [account, market]);
   const [isYes, setIsYes] = useState(true);
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
   const data = detail.data!.market;
+  const refresh = () => { detail.reload(); mine.reload(); };
   return (
     <div className="stack">
       <div className="row between">
         <a href="#/">← All markets</a>
-        <button onClick={detail.reload}>Refresh</button>
+        <button onClick={refresh}>Refresh</button>
       </div>
       <Card>
         <div className="row between">
@@ -50,12 +61,18 @@ export function MarketDetail({ market }: { market: string }) {
       </Card>
       <ZeroFee />
       <div className="split">
-        <Card title="Order book">
-          <OrderBook book={isYes ? detail.data!.book.yes : detail.data!.book.no} isYes={isYes} onSelect={setIsYes} />
+        <Card title={`Order book · ${isYes ? 'YES' : 'NO'}`}>
+          <OrderBook book={isYes ? detail.data!.book.yes : detail.data!.book.no} isYes={isYes} />
         </Card>
-        {data.status === 'OPEN'
-          ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes} onDone={detail.reload} />
-          : <Card title="Trading closed"><p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Holdings</a>.</p></Card>}
+        <div className="stack">
+          {data.status === 'OPEN'
+            ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes}
+                account={account} position={mine.data?.position} onDone={refresh} />
+            : <Card title="Trading closed"><p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Portfolio</a>.</p></Card>}
+          {account && (mine.data?.orders.length ?? 0) > 0 && (
+            <YourOrders orders={mine.data!.orders} account={account} onDone={refresh} />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -71,8 +88,9 @@ const label = (side: Side) => `${side.isBuy ? 'Buy' : 'Sell'} ${side.isYes ? 'YE
  * order rests at the maker's own price until someone fills it. Underneath, the limit order is an
  * Aqua order whose start and end prices are equal, which is what the contract treats as fixed.
  */
-function OrderTicket({ market, book, isYes, onOutcome, onDone }: {
-  market: string; book: Market['liquidity']; isYes: boolean; onOutcome: (isYes: boolean) => void; onDone: () => void;
+function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone }: {
+  market: string; book: Market['liquidity']; isYes: boolean; onOutcome: (isYes: boolean) => void;
+  account?: string; position?: Position; onDone: () => void;
 }) {
   const wallet = useWallet();
   const [type, setType] = useState<OrderType>('market');
@@ -102,16 +120,67 @@ function OrderTicket({ market, book, isYes, onOutcome, onDone }: {
         <span>Best bid <strong>{price(outcome.bid)}</strong></span>
         <span>{shares(outcome.availableShares)} offered</span>
       </div>
+      {account && (
+        <p className="small muted" style={{ marginTop: '-.4rem' }}>
+          {position
+            ? <>You hold <strong>{shares(position.yes)} YES</strong> · <strong>{shares(position.no)} NO</strong> here.</>
+            : 'You hold no outcome tokens in this market, so there is nothing to sell yet.'}
+        </p>
+      )}
       {type === 'market'
-        ? <MarketOrder market={market} side={side} account={wallet.account} onDone={onDone} onSwitchToLimit={() => setType('limit')} />
-        : <LimitOrder market={market} side={side} account={wallet.account} book={outcome} onDone={onDone} />}
-      {!wallet.account && (
+        ? <MarketOrder market={market} side={side} account={account} onDone={onDone} onSwitchToLimit={() => setType('limit')} />
+        : <LimitOrder market={market} side={side} account={account} book={outcome} onDone={onDone} />}
+      {!account && (
         <button className="primary" style={{ width: '100%', marginTop: '.6rem' }} onClick={() => void wallet.connect()}>Connect wallet</button>
       )}
       <p className="small muted" style={{ marginTop: '.75rem', marginBottom: 0 }}>
         Need a price that moves as the order fills?{' '}
         <a href={`#/publish?market=${market}&side=${side.isYes ? 'yes' : 'no'}&direction=${side.isBuy ? 'buy' : 'sell'}`}>Publish a pricing curve</a>.
       </p>
+    </Card>
+  );
+}
+
+/**
+ * The account's own resting orders in this market. Live ones are shown and can be cancelled here;
+ * anything filled or closed is history and belongs in the Portfolio, which this links to.
+ */
+function YourOrders({ orders, account, onDone }: { orders: MakerCurve[]; account: string; onDone: () => void }) {
+  const { cancel, busy, tx, error } = useCancelCurve(account, onDone);
+  const live = orders.filter(isLive);
+  const rest = orders.length - live.length;
+  return (
+    <Card
+      title={<>Your orders <span className="count">{live.length}</span></>}
+      actions={<a className="small" href="#/holdings?tab=orders">All orders</a>}
+    >
+      {error && <Notice kind="error">{error}</Notice>}
+      <TransactionState state={tx} />
+      {live.map(curve => (
+        <div key={curve.orderHash} className="own-order">
+          <div className="row between">
+            <span className={`badge ${curve.direction === 'BUY' ? 'resolved' : 'no'}`}>{curve.direction} {curve.side}</span>
+            <span className="mono small">
+              {curve.isLimit ? priceUsdc(curve.startPrice) : `${priceUsdc(curve.startPrice)} → ${priceUsdc(curve.endPrice)}`}
+            </span>
+          </div>
+          <Fill filled={curve.filled} total={curve.maxShares} />
+          <div className="row between small muted">
+            <span>{shares(curve.filled)} / {shares(curve.maxShares)} filled</span>
+            {curve.cancellable && (
+              <button className="link" disabled={busy !== undefined} onClick={() => void cancel(curve)}>
+                {busy === curve.orderHash ? 'Cancelling…' : 'Cancel'}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+      {live.length === 0 && <p className="small muted" style={{ margin: 0 }}>Nothing resting here right now.</p>}
+      {rest > 0 && (
+        <p className="small muted" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+          {rest} filled or closed order{rest === 1 ? '' : 's'} in this market · <a href="#/holdings?tab=orders">see Portfolio</a>
+        </p>
+      )}
     </Card>
   );
 }

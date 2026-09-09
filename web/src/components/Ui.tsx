@@ -103,6 +103,17 @@ export function TransactionState({ state }: { state: TxState }) {
   return <Notice kind="error">{state.message ?? 'The transaction failed.'}</Notice>;
 }
 
+/** How far an order has filled, so a part-filled row reads at a glance rather than by arithmetic. */
+export function Fill({ filled, total }: { filled: string; total: string }) {
+  const size = BigInt(total);
+  const percent = size === 0n ? 0 : Number((BigInt(filled) * 100n) / size);
+  return (
+    <div className="fill" title={`${percent}% filled`}>
+      <span style={{ width: `${Math.min(100, percent)}%` }} />
+    </div>
+  );
+}
+
 /** Brand-coloured, not green: green is reserved for the YES outcome. */
 export function ZeroFee({ children }: { children?: ReactNode }) {
   return (

@@ -72,7 +72,6 @@ const CURVE: CurvePreview = { isBuy: true, startPrice: 620000, endPrice: 430000,
 
 export function DesignSystem() {
   const [theme, setTheme] = useState<Theme>('system');
-  const [isYes, setIsYes] = useState(true);
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'system') root.removeAttribute('data-theme');
@@ -324,13 +323,39 @@ export function DesignSystem() {
             </div>
           ))}
         </div>
+        <h3 style={{ marginTop: 'var(--space-4)' }}>Your own resting order</h3>
+        <p className="small muted">Shown beside the book on a market page, narrow enough for the side column.</p>
+        <div style={{ maxWidth: '22rem' }}>
+          <div className="own-order">
+            <div className="row between">
+              <span className="badge resolved">BUY YES</span>
+              <span className="mono small">0.6200 USDC → 0.4300 USDC</span>
+            </div>
+            <div className="fill"><span style={{ width: '35%' }} /></div>
+            <div className="row between small muted">
+              <span>8.750000 / 25.000000 filled</span>
+              <button className="link">Cancel</button>
+            </div>
+          </div>
+          <div className="own-order">
+            <div className="row between">
+              <span className="badge no">SELL NO</span>
+              <span className="mono small">0.4000 USDC</span>
+            </div>
+            <div className="fill"><span style={{ width: '0%' }} /></div>
+            <div className="row between small muted">
+              <span>0 / 1.000000 filled</span>
+              <button className="link">Cancel</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="ds-section">
         <h2>Order book</h2>
         <div className="split">
-          <Card title="Ladder">
-            <OrderBook book={BOOK} isYes={isYes} onSelect={setIsYes} />
+          <Card title="Ladder · YES">
+            <OrderBook book={BOOK} isYes />
           </Card>
           <Card title="Order summary">
             <dl className="kv total">
