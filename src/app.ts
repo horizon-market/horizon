@@ -56,7 +56,7 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
   app.use('/api/creation', creationRoutes(services.creation));
   app.get('/api/config', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }),
     (_req, res) => res.json(publicConfig(config, services)));
-  app.use('/api', tradingRoutes(config.trading));
+  app.use('/api', tradingRoutes(config.trading, services.markets));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok', service: 'horizon-api' }));
   app.get('/health/ready', async (_req, res) => {
     try {
@@ -71,10 +71,15 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
     rootPath: '/admin',
     // Served from web/dist by this process, so the panel carries the same brand as the app.
     branding: { companyName: 'Horizon', withMadeWithLove: false, logo: '/brand/brandmark.svg', favicon: '/favicon.ico' },
-    resources: ['CreationRequest', 'PaymentIntent', 'HumanVerification', 'DiscountUsage', 'MarketResolution', 'AdminAudit', 'JobRun'].map(name => ({
+    resources: [
+      ...['CreationRequest', 'PaymentIntent', 'HumanVerification', 'DiscountUsage', 'MarketResolution', 'AdminAudit', 'JobRun']
+        .map(name => [name, 'Operations'] as const),
+      // Derived rows, grouped apart so an operator never mistakes the mirror for the source of truth.
+      ...['MarketProjection', 'CurveProjection', 'SyncCheckpoint'].map(name => [name, 'Market mirror (read model)'] as const),
+    ].map(([name, group]) => ({
       resource: { model: getModelByName(name), client: db },
       options: {
-        navigation: { name: 'Operations' },
+        navigation: { name: group },
         actions: Object.fromEntries(['new', 'edit', 'delete', 'bulkDelete'].map(action => [action, { isAccessible: false, isVisible: false }])),
         // Request bearer tokens are stored hashed; never render the column.
         properties: name === 'CreationRequest' ? { accessTokenHash: { isVisible: false } } : {},

@@ -109,7 +109,7 @@ export function PublishCurve({ query }: { query: URLSearchParams }) {
   return (
     <div className="stack">
       <h1>{form.type === 'limit' ? 'Place a limit order' : 'Publish a curve'}</h1>
-      <Notice kind="ok">
+      <Notice kind="brand">
         <strong>0% trading fees.</strong> Publishing and filling an order costs nothing beyond network gas.
       </Notice>
       <div className="split">

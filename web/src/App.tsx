@@ -9,6 +9,7 @@ import { Holdings } from './pages/Holdings';
 import { PublishCurve } from './pages/PublishCurve';
 import { CreateMarket } from './pages/CreateMarket';
 import { Admin } from './pages/Admin';
+import { DesignSystem } from './pages/DesignSystem';
 
 type Wallet = { account?: string; connect: () => Promise<void>; error?: string };
 const ConfigContext = createContext<AppConfig | undefined>(undefined);
@@ -16,7 +17,8 @@ const WalletContext = createContext<Wallet>({ connect: async () => undefined });
 export const useConfig = () => useContext(ConfigContext)!;
 export const useWallet = () => useContext(WalletContext);
 
-// The operator screen is deliberately absent from the navigation; it is reached by its path.
+// The operator screen and the design-system reference are deliberately absent from the
+// navigation; both are reached by their path.
 const LINKS = [['/', 'Markets'], ['/holdings', 'Portfolio'], ['/publish', 'Pricing curves'], ['/create', 'Create market']] as const;
 
 export function App() {
@@ -52,9 +54,12 @@ export function App() {
       </header>
       <main>
         {walletError && <div style={{ marginBottom: '1rem' }}><Notice kind="warn">{walletError}</Notice></div>}
-        {config.loading && <Loading rows={4} label="Loading Horizon configuration" />}
-        {config.error ? <ErrorBox error={config.error} retry={config.reload} /> : null}
-        {config.data && (
+        {/* The design-system reference renders from tokens alone, so it stays reviewable
+            without a configured API behind it. */}
+        {route.path[0] === 'design' && <DesignSystem />}
+        {route.path[0] !== 'design' && config.loading && <Loading rows={4} label="Loading Horizon configuration" />}
+        {route.path[0] !== 'design' && config.error ? <ErrorBox error={config.error} retry={config.reload} /> : null}
+        {route.path[0] !== 'design' && config.data && (
           <ConfigContext.Provider value={config.data}>
             <WalletContext.Provider value={wallet}>
               <Page route={route} />
@@ -74,9 +79,10 @@ function Page({ route }: { route: ReturnType<typeof useRoute> }) {
   const [section, parameter] = route.path;
   if (!section) return <Markets />;
   if (section === 'markets' && parameter) return <MarketDetail market={parameter} />;
-  if (section === 'holdings') return <Holdings />;
+  if (section === 'holdings') return <Holdings query={route.query} />;
   if (section === 'publish') return <PublishCurve query={route.query} />;
   if (section === 'create') return <CreateMarket />;
   if (section === 'admin') return <Admin />;
+  if (section === 'design') return <DesignSystem />;
   return <Notice kind="warn">That page does not exist. <a href="#/">Back to markets</a>.</Notice>;
 }

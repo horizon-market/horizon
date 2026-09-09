@@ -22,10 +22,11 @@ const redeemSchema = z.object({ account: address, market: address, recipient: ad
 
 export const serialize = (value: unknown) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item));
 
-export function tradingRoutes(config?: TradingConfig) {
+/** `service` is the wired MarketService, which knows whether a local mirror is available. */
+export function tradingRoutes(config?: TradingConfig, marketService?: MarketService) {
   const router = Router();
   const service = config ? new QuoteService(config) : undefined;
-  const markets = config ? new MarketService(config) : undefined;
+  const markets = marketService ?? (config ? new MarketService(config) : undefined);
   let activeQuotes = 0;
   const reads = rateLimit({ windowMs: 60_000, limit: 240, standardHeaders: 'draft-8', legacyHeaders: false });
   const writes = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -41,11 +42,13 @@ export function tradingRoutes(config?: TradingConfig) {
       res.status(503).json({ error: 'market_data_unavailable' });
     });
 
+  // One read, from the mirror when it is fresh. The second, untyped Graph query this used to run
+  // alongside it returned the same markets again and set the floor on how fast the page could load.
   router.get('/markets', reads, async (_req, res) => {
-    if (!markets || !service) { res.status(503).json({ error: 'trading_not_configured' }); return; }
+    if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     try {
-      const [enriched, raw] = await Promise.all([markets.list(), service.graph.markets()]);
-      res.json(serialize({ ...(raw as object), ...enriched }));
+      const [list, sync] = await Promise.all([markets.list(), markets.syncStatus()]);
+      res.json(serialize({ ...list, sync }));
     } catch { res.status(503).json({ error: 'graph_unavailable' }); }
   });
   router.get('/markets/:market', reads, async (req, res) => {

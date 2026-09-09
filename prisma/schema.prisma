@@ -138,3 +138,69 @@ model AdminSession {
   @@index([expire], map: "AdminSession_expire_idx")
   @@ignore
 }
+
+// ---------------------------------------------------------------------------
+// Read model. The registry and market contracts stay authoritative; every row
+// below is a projection of Graph-indexed state, rebuilt by the sync worker and
+// never written by a user request. Reads fall back to The Graph when the
+// projection is stale, so a stopped worker degrades latency, never correctness.
+// ---------------------------------------------------------------------------
+
+model MarketProjection {
+  address            String   @id
+  creationId         String
+  question           String
+  rules              String
+  evidenceSource     String
+  closeAt            DateTime
+  resolver           String
+  yesToken           String
+  noToken            String
+  result             Int      @default(0)
+  resolutionEvidence String
+  // uint256 values are decimal strings, as elsewhere in this schema.
+  collateral         String   @default("0")
+  createdAt          DateTime
+  indexedBlock       Int
+  syncedAt           DateTime @default(now())
+
+  curves CurveProjection[]
+
+  @@index([createdAt])
+  @@index([result, closeAt])
+}
+
+model CurveProjection {
+  id            String   @id
+  marketAddress String
+  market        MarketProjection @relation(fields: [marketAddress], references: [address], onDelete: Cascade)
+  maker         String
+  flags         Int
+  startPrice    Int
+  endPrice      Int
+  maxShares     String
+  filled        String
+  salt          String
+  active        Boolean
+  publishedAt   DateTime
+  indexedBlock  Int
+  syncedAt      DateTime @default(now())
+
+  @@index([maker, publishedAt])
+  @@index([marketAddress, active])
+}
+
+// One row per projection, recording the Graph block the mirror is complete
+// through. Freshness is judged from this, not from the age of individual rows.
+model SyncCheckpoint {
+  id           String   @id
+  indexedBlock Int      @default(0)
+  indexedHash  String   @default("")
+  status       String   @default("OK")
+  failureCode  String?
+  markets      Int      @default(0)
+  curves       Int      @default(0)
+  durationMs   Int      @default(0)
+  syncedAt     DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

@@ -36,7 +36,7 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   return <div className="empty"><p style={{ fontWeight: 600, color: 'var(--text)' }}>{title}</p>{children}</div>;
 }
 
-export function Notice({ kind = 'info', children }: { kind?: 'info' | 'ok' | 'warn' | 'error'; children: ReactNode }) {
+export function Notice({ kind = 'info', children }: { kind?: 'info' | 'ok' | 'warn' | 'error' | 'brand'; children: ReactNode }) {
   return <div className={`notice ${kind}`} role={kind === 'error' ? 'alert' : undefined}>{children}</div>;
 }
 
@@ -103,9 +103,10 @@ export function TransactionState({ state }: { state: TxState }) {
   return <Notice kind="error">{state.message ?? 'The transaction failed.'}</Notice>;
 }
 
+/** Brand-coloured, not green: green is reserved for the YES outcome. */
 export function ZeroFee({ children }: { children?: ReactNode }) {
   return (
-    <Notice kind="ok">
+    <Notice kind="brand">
       <strong>0% trading fees.</strong> No maker, taker, routing or Horizon protocol fee is charged on any trade. Network gas is separate.
       {children}
     </Notice>

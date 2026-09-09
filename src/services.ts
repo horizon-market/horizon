@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Config } from './config.js';
 import { MarketService } from './trading/markets.js';
+import { MarketProjectionStore, syncMarkets } from './trading/projection.js';
 import { createDraftProvider } from './creation/ai.js';
 import { createVerifier } from './world/verifier.js';
 import { createFacilitator } from './payments/x402.js';
@@ -12,7 +13,9 @@ export type QueueBindings = { enqueueCreation?: (requestId: string) => Promise<v
 
 /** One wiring point for the API process, the worker process and integration tests. */
 export function buildServices(config: Config, db: PrismaClient, queue: QueueBindings = {}) {
-  const markets = config.trading ? new MarketService(config.trading) : undefined;
+  // The mirror is only consulted when the sync is enabled; otherwise every read goes to The Graph.
+  const projection = config.marketSync.enabled ? new MarketProjectionStore(db, config.marketSync.maxStalenessMs) : undefined;
+  const markets = config.trading ? new MarketService(config.trading, projection) : undefined;
   const provider = createDraftProvider(config.ai);
   const verifier = createVerifier(config.world);
   const facilitator = createFacilitator(config.payments);
@@ -33,7 +36,11 @@ export function buildServices(config: Config, db: PrismaClient, queue: QueueBind
     },
   });
   const admin = new AdminService({ db, markets, submitter, enqueueCreation: queue.enqueueCreation, enqueueResolution: queue.enqueueResolution });
-  return { markets, creation, admin, provider, verifier, facilitator, deployer, submitter };
+  // Bound to the worker's sync job. The API process builds it too but never calls it.
+  const syncProjection = markets && config.marketSync.enabled
+    ? () => syncMarkets(db, markets.graph, { pageSize: config.marketSync.pageSize })
+    : undefined;
+  return { markets, creation, admin, provider, verifier, facilitator, deployer, submitter, projection, syncProjection };
 }
 
 export function publicConfig(config: Config, services: ReturnType<typeof buildServices>) {

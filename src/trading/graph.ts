@@ -62,6 +62,15 @@ function toSnapshot(data: z.infer<typeof snapshotSchema>): IndexedSnapshot {
         endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), salt: strategy.salt as Hex } })),
   })) };
 }
+/** One market row as the projection stores it: no nested curves, so a sweep can page both flat. */
+export type ProjectedMarket = Omit<IndexedMarket, 'curves'>;
+export type ProjectedCurve = { id: Hex; market: Address; maker: Address; flags: number; startPrice: number;
+  endPrice: number; maxShares: bigint; filled: bigint; salt: Hex; active: boolean; publishedAt: number };
+const meta = z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() });
+const pagedMarketsSchema = z.object({ _meta: meta, markets: z.array(marketSchema.omit({ strategies: true })).max(1000) });
+const pagedStrategiesSchema = z.object({ _meta: meta,
+  strategies: z.array(strategySchema.extend({ filled: integer, active: z.boolean(), publishedAt: integer })).max(1000) });
+
 export class GraphError extends Error {}
 
 export class GraphProvider {
@@ -152,6 +161,42 @@ export class GraphProvider {
       yesToken: strategy.market.yesToken as Address, noToken: strategy.market.noToken as Address,
     })) };
   }
+  /**
+   * Cursor pagination for the projection sync. Ordering by id and seeking past the last id
+   * keeps a full sweep stable and unbounded, which `skip` on a hosted index cannot promise.
+   */
+  async pageMarkets(afterId: string, first: number): Promise<{ block: number; hash: Hex; markets: ProjectedMarket[] }> {
+    const data = pagedMarketsSchema.parse(await this.query(`query MarketPage($after: Bytes!, $first: Int!) {
+      _meta { block { number hash } hasIndexingErrors }
+      markets(first: $first, orderBy: id, orderDirection: asc, where: { id_gt: $after }) {
+        id creationId question rules evidenceSource closeAt resolver yesToken noToken result resolutionEvidence collateral createdAt
+      }
+    }`, { after: afterId, first }));
+    if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
+    return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, markets: data.markets.map(market => ({
+      id: market.id as Address, creationId: market.creationId, question: market.question, rules: market.rules,
+      evidenceSource: market.evidenceSource, closeAt: Number(market.closeAt), resolver: market.resolver as Address,
+      yesToken: market.yesToken as Address, noToken: market.noToken as Address, result: market.result,
+      resolutionEvidence: market.resolutionEvidence, collateral: BigInt(market.collateral), createdAt: Number(market.createdAt),
+    })) };
+  }
+
+  /** Every curve, cancelled and exhausted ones included: the mirror serves maker views too. */
+  async pageStrategies(afterId: string, first: number): Promise<{ block: number; hash: Hex; curves: ProjectedCurve[] }> {
+    const data = pagedStrategiesSchema.parse(await this.query(`query StrategyPage($after: Bytes!, $first: Int!) {
+      _meta { block { number hash } hasIndexingErrors }
+      strategies(first: $first, orderBy: id, orderDirection: asc, where: { id_gt: $after }) {
+        id maker flags startPrice endPrice maxShares salt filled active publishedAt market { id }
+      }
+    }`, { after: afterId, first }));
+    if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
+    return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, curves: data.strategies.map(strategy => ({
+      id: strategy.id as Hex, market: strategy.market.id as Address, maker: strategy.maker as Address, flags: strategy.flags,
+      startPrice: Number(strategy.startPrice), endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares),
+      filled: BigInt(strategy.filled), salt: strategy.salt as Hex, active: strategy.active, publishedAt: Number(strategy.publishedAt),
+    })) };
+  }
+
   async markets() {
     return this.query(`{ _meta { block { number hash } hasIndexingErrors } markets(first: 50, orderBy: createdAt, orderDirection: desc) {
       id question rules evidenceSource closeAt resolver yesToken noToken result collateral createdAt

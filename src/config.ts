@@ -2,6 +2,9 @@ import { z } from 'zod';
 import type { TradingConfig } from './trading/service.js';
 import type { Address, Hex } from 'viem';
 
+/** An unset key and an empty key mean the same thing in a .env file: take the default. */
+const blank = <T extends z.ZodTypeAny>(inner: T) => z.preprocess(value => value === '' ? undefined : value, inner);
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('127.0.0.1'),
@@ -12,6 +15,13 @@ const schema = z.object({
   SESSION_SECRET: z.string().min(32),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   WEB_ORIGIN: z.string().default('http://127.0.0.1:5173'),
+  // Market mirror. The sync worker refreshes on this interval; reads fall back to The Graph once
+  // the mirror is older than the staleness budget, so these two together bound how wrong a page
+  // can be before correctness is handed back to the indexer.
+  MARKET_SYNC_ENABLED: blank(z.enum(['true', 'false']).default('true').transform(value => value === 'true')),
+  MARKET_SYNC_INTERVAL_MS: blank(z.coerce.number().int().min(2_000).max(600_000).default(15_000)),
+  MARKET_SYNC_MAX_STALENESS_MS: blank(z.coerce.number().int().min(5_000).max(3_600_000).default(120_000)),
+  MARKET_SYNC_PAGE_SIZE: blank(z.coerce.number().int().min(10).max(1_000).default(200)),
 });
 
 /** Hedera x402 charge for the creation service only. It is unrelated to trading, which has no fee. */
@@ -25,8 +35,11 @@ export type AiConfig = { provider: 'anthropic' | 'development'; apiKey?: string;
 /** Server-side market deployment. The key stays in the API/worker process and never reaches a browser. */
 export type CreationConfig = { rpc: string; registry: Address; resolver: Address; privateKey?: Hex; minCloseInSeconds: number; maxCloseInSeconds: number };
 
+export type MarketSyncConfig = { enabled: boolean; intervalMs: number; maxStalenessMs: number; pageSize: number };
+
 export type Config = z.infer<typeof schema> & {
   trading?: TradingConfig; creation?: CreationConfig; payments: PaymentsConfig; world: WorldConfig; ai: AiConfig;
+  marketSync: MarketSyncConfig;
 };
 
 const positiveInteger = (value: string | undefined, fallback: bigint) => {
@@ -52,6 +65,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const worldEnvironment = env.WORLD_ENVIRONMENT === 'production' ? 'production' : 'staging';
   const config: Config = {
     ...result.data,
+    marketSync: {
+      enabled: result.data.MARKET_SYNC_ENABLED, intervalMs: result.data.MARKET_SYNC_INTERVAL_MS,
+      maxStalenessMs: result.data.MARKET_SYNC_MAX_STALENESS_MS, pageSize: result.data.MARKET_SYNC_PAGE_SIZE,
+    },
     payments: {
       facilitatorUrl: env.HEDERA_FACILITATOR_URL || 'https://api.testnet.blocky402.com',
       network: env.HEDERA_NETWORK || 'hedera:testnet',

@@ -1,6 +1,7 @@
 import { createPublicClient, http, erc20Abi, encodeAbiParameters, parseAbiParameters, encodeFunctionData, keccak256, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
-import { GraphProvider, type IndexedMarket } from './graph.js';
+import { GraphProvider, type IndexedMarket, type IndexedSnapshot } from './graph.js';
+import type { MarketProjectionStore } from './projection.js';
 import { cumulative, type Curve } from './math.js';
 import { buildBook, summarize, type MarketLiquidity } from './liquidity.js';
 import { aquaAbi, marketAbi, registryAbi, routerAbi } from './abi.js';
@@ -12,6 +13,9 @@ export type PublishInput = { maker: Address; market: Address; isYes: boolean; is
 export type RedeemInput = { account: Address; market: Address; yesShares: bigint; noShares: bigint; recipient: Address };
 
 export type MarketSummary = IndexedMarket & { liquidity: MarketLiquidity; status: 'OPEN' | 'CLOSED' | 'RESOLVED' };
+/** Which store answered a read: the local mirror, or The Graph directly. */
+export type Source = 'projection' | 'graph';
+export type { IndexedSnapshot };
 
 const status = (market: IndexedMarket, now: number): MarketSummary['status'] =>
   market.result !== 0 ? 'RESOLVED' : market.closeAt <= now ? 'CLOSED' : 'OPEN';
@@ -23,9 +27,34 @@ const status = (market: IndexedMarket, now: number): MarketSummary['status'] =>
 export class MarketService {
   readonly graph: GraphProvider;
   readonly client;
-  constructor(readonly config: TradingConfig) {
+  constructor(readonly config: TradingConfig, private projection?: MarketProjectionStore) {
     this.graph = new GraphProvider(config.graph, config.graphKey);
     this.client = createPublicClient({ chain: sepolia, transport: http(config.rpc, { timeout: 15_000, retryCount: 1 }) });
+  }
+
+  /**
+   * Discovery reads the local mirror when it is fresh and The Graph when it is not, so a stopped
+   * sync worker costs latency rather than correctness. Nothing a user signs is served from here:
+   * quoting, publication, cancellation and redemption all re-read the chain first.
+   */
+  private async read<T>(fromProjection: () => Promise<T | null>, fromGraph: () => Promise<T>): Promise<T & { source: Source }> {
+    if (this.projection) {
+      try {
+        const mirrored = await fromProjection();
+        if (mirrored) return { ...mirrored, source: 'projection' as const };
+      } catch { console.error('Market projection unavailable; falling back to The Graph'); }
+    }
+    return { ...(await fromGraph()), source: 'graph' as const };
+  }
+
+  /** Operational visibility for the mirror itself: how far behind it is, and why. */
+  async syncStatus() {
+    if (!this.projection) return { enabled: false as const };
+    const state = await this.projection.freshness();
+    return { enabled: true as const, usable: state.usable, ageMs: Number.isFinite(state.ageMs) ? state.ageMs : null,
+      indexedBlock: state.checkpoint?.indexedBlock ?? null, status: state.checkpoint?.status ?? 'NEVER_RUN',
+      failureCode: state.checkpoint?.failureCode ?? null, syncedAt: state.checkpoint?.syncedAt ?? null,
+      markets: state.checkpoint?.markets ?? 0, curves: state.checkpoint?.curves ?? 0 };
   }
 
   private decorate(markets: IndexedMarket[]) {
@@ -34,13 +63,14 @@ export class MarketService {
   }
 
   async list() {
-    const snapshot = await this.graph.indexedMarkets();
-    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, fees: { maker: 0, taker: 0, routing: 0, protocol: 0 }, markets: this.decorate(snapshot.markets) };
+    const snapshot = await this.read(() => this.projection!.indexedMarkets(), () => this.graph.indexedMarkets());
+    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, source: snapshot.source,
+      fees: { maker: 0, taker: 0, routing: 0, protocol: 0 }, markets: this.decorate(snapshot.markets) };
   }
 
   /** Market detail refreshes open status, collateral and result through RPC before display. */
   async detail(market: Address) {
-    const snapshot = await this.graph.indexedMarket(market);
+    const snapshot = await this.read(() => this.projection!.indexedMarket(market), () => this.graph.indexedMarket(market));
     const indexed = snapshot.markets[0];
     if (!indexed) throw new MarketError('unknown_market');
     const [registered, isOpen, result, collateral] = await Promise.all([
@@ -51,16 +81,16 @@ export class MarketService {
     ]);
     if (!registered) throw new MarketError('unknown_market');
     const [summary] = this.decorate([{ ...indexed, result, collateral }]);
-    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
+    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, source: snapshot.source, fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
       book: buildBook(indexed.curves),
       market: { ...summary!, status: result !== 0 ? 'RESOLVED' : isOpen ? 'OPEN' : 'CLOSED', chainConfirmed: true } };
   }
 
   /** Holdings come from live token balances, not indexed transfers. */
   async positions(account: Address) {
-    const snapshot = await this.graph.indexedMarkets();
+    const snapshot = await this.read(() => this.projection!.indexedMarkets(), () => this.graph.indexedMarkets());
     const markets = snapshot.markets;
-    if (markets.length === 0) return { indexedBlock: snapshot.block, positions: [] };
+    if (markets.length === 0) return { indexedBlock: snapshot.block, source: snapshot.source, positions: [] };
     const balances = await this.client.multicall({
       allowFailure: false,
       contracts: markets.flatMap(market => [
@@ -79,7 +109,7 @@ export class MarketService {
         result: RESULTS[market.result], yesToken: market.yesToken, noToken: market.noToken,
         yes: yes.toString(), no: no.toString(), redeemableUsdc: redeemable.toString() }];
     });
-    return { indexedBlock: snapshot.block, positions };
+    return { indexedBlock: snapshot.block, source: snapshot.source, positions };
   }
 
   /**
@@ -87,9 +117,9 @@ export class MarketService {
    * depends on the wallet balance the curve's Aqua allocation draws on, which is shared.
    */
   async curvesFor(maker: Address) {
-    const snapshot = await this.graph.curvesByMaker(maker);
+    const snapshot = await this.read(() => this.projection!.curvesByMaker(maker), () => this.graph.curvesByMaker(maker));
     const now = Math.floor(Date.now() / 1000);
-    return { indexedBlock: snapshot.block, curves: snapshot.curves.map(curve => {
+    return { indexedBlock: snapshot.block, source: snapshot.source, curves: snapshot.curves.map(curve => {
       const isYes = (curve.flags & 1) !== 0, isBuy = (curve.flags & 2) !== 0;
       const remaining = curve.maxShares > curve.filled ? curve.maxShares - curve.filled : 0n;
       return {
