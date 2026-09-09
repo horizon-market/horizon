@@ -29,6 +29,9 @@ export function tradingRoutes(config?: TradingConfig) {
   let activeQuotes = 0;
   const reads = rateLimit({ windowMs: 60_000, limit: 240, standardHeaders: 'draft-8', legacyHeaders: false });
   const writes = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
+  // The order ticket prices itself as the trader types, so quoting gets its own budget. Each
+  // quote still refreshes chain state and simulates a whole route, and stays concurrency-capped.
+  const quotes = rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
   const guard = <T>(res: Parameters<Parameters<Router['get']>[1]>[1], run: () => Promise<T>) => run().then(
     value => res.json(serialize(value)),
     error => {
@@ -81,7 +84,7 @@ export function tradingRoutes(config?: TradingConfig) {
     if (!input.success) { res.status(400).json({ error: 'invalid_redemption_request' }); return; }
     await guard(res, () => markets.prepareRedemption(input.data));
   });
-  router.post('/quotes', writes, async (req, res) => {
+  router.post('/quotes', quotes, async (req, res) => {
     if (!service) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     const input = quoteSchema.safeParse(req.body);
     if (!input.success) { res.status(400).json({ error: 'invalid_quote_request' }); return; }

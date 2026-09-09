@@ -17,7 +17,7 @@ export const useConfig = () => useContext(ConfigContext)!;
 export const useWallet = () => useContext(WalletContext);
 
 // The operator screen is deliberately absent from the navigation; it is reached by its path.
-const LINKS = [['/', 'Markets'], ['/holdings', 'Holdings'], ['/publish', 'Publish curve'], ['/create', 'Create market']] as const;
+const LINKS = [['/', 'Markets'], ['/holdings', 'Portfolio'], ['/publish', 'Pricing curves'], ['/create', 'Create market']] as const;
 
 export function App() {
   const route = useRoute();
