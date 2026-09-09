@@ -26,6 +26,9 @@ export type Market = {
   yesToken: string; noToken: string; result: number; resolutionEvidence: string; collateral: string; createdAt: number;
   status: 'OPEN' | 'CLOSED' | 'RESOLVED'; liquidity: { yes: SideLiquidity; no: SideLiquidity; curves: number }; curves: Curve[];
 };
+export type BookLevel = { price: number; shares: string; orders: number; source: 'direct' | 'complementary' | 'mixed'; executable: boolean };
+export type OutcomeBook = { asks: BookLevel[]; bids: BookLevel[]; spread: number | null };
+export type MarketBook = { yes: OutcomeBook; no: OutcomeBook };
 export type MarketList = { indexedBlock: number; indexedHash: string; fees: Fees; markets: Market[] };
 export type Quote = {
   chainId: number; market: string; shares: string; usdc: string; limit: string; deadline: number; fees: Fees;
@@ -101,7 +104,7 @@ const post = <T>(path: string, body: unknown, headers: Record<string, string> = 
 export const api = {
   config: () => request<AppConfig>('/api/config'),
   markets: () => request<MarketList>('/api/markets'),
-  market: (id: string) => request<{ indexedBlock: number; market: Market }>(`/api/markets/${id}`),
+  market: (id: string) => request<{ indexedBlock: number; market: Market; book: MarketBook }>(`/api/markets/${id}`),
   positions: (account: string) => request<{ indexedBlock: number; positions: Position[] }>(`/api/positions/${account}`),
   makerCurves: (account: string) => request<{ indexedBlock: number; curves: MakerCurve[] }>(`/api/curves/${account}`),
   quote: (input: { market: string; account: string; recipient: string; isYes: boolean; isBuy: boolean; shares: string; slippageBps: number }) => post<Quote>('/api/quotes', input),

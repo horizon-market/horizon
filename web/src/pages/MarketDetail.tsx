@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, type Curve, type Market, type Publication, type Quote } from '../api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, ApiError, type Market, type Publication, type Quote } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
-import { Address, Badge, Card, Empty, ErrorBox, Loading, Notice, TransactionState, ZeroFee, describe, type TxState } from '../components/Ui';
+import { Address, Badge, Card, ErrorBox, Loading, Notice, TransactionState, ZeroFee, describe, type TxState } from '../components/Ui';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
+import { OrderBook } from '../components/OrderBook';
 import { approve, confirm, describeWalletError, send } from '../wallet';
 
 const RESULTS = ['Unresolved', 'YES', 'NO', 'INVALID'];
-const SHAPES = ['', 'linear', 'quadratic', 'cubic'];
 
 export function MarketDetail({ market }: { market: string }) {
   const detail = useAsync(() => api.market(market), [market]);
+  const [isYes, setIsYes] = useState(true);
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
   const data = detail.data!.market;
@@ -49,48 +50,14 @@ export function MarketDetail({ market }: { market: string }) {
       </Card>
       <ZeroFee />
       <div className="split">
-        <Curves curves={data.curves} />
+        <Card title="Order book">
+          <OrderBook book={isYes ? detail.data!.book.yes : detail.data!.book.no} isYes={isYes} onSelect={setIsYes} />
+        </Card>
         {data.status === 'OPEN'
-          ? <OrderTicket market={market} book={data.liquidity} onDone={detail.reload} />
+          ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes} onDone={detail.reload} />
           : <Card title="Trading closed"><p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Holdings</a>.</p></Card>}
       </div>
     </div>
-  );
-}
-
-function Curves({ curves }: { curves: Curve[] }) {
-  return (
-    <Card title="Order book">
-      {curves.length === 0
-        ? <Empty title="No open orders">
-            <p className="small">Nobody is quoting this market yet. Place a limit order to be the first, and it rests until someone trades against it.</p>
-          </Empty>
-        : <div className="scroll">
-            <table>
-              <thead><tr><th>Side</th><th>Type</th><th>Price</th><th>Filled</th><th>Maker</th></tr></thead>
-              <tbody>
-                {curves.map(curve => {
-                  const flags = curve.strategy.flags, isBuy = (flags & 2) !== 0, isYes = (flags & 1) !== 0;
-                  const isLimit = curve.strategy.startPrice === curve.strategy.endPrice;
-                  return (
-                    <tr key={curve.id}>
-                      <td><span className={`badge ${isBuy ? 'resolved' : 'no'}`}>{isBuy ? 'BUY' : 'SELL'} {isYes ? 'YES' : 'NO'}</span></td>
-                      <td className="small">{isLimit ? 'Limit' : `Curve · ${SHAPES[flags >> 2]}`}</td>
-                      <td className="small">{isLimit ? priceUsdc(curve.strategy.startPrice)
-                        : `${priceUsdc(curve.strategy.startPrice)} → ${priceUsdc(curve.strategy.endPrice)}`}</td>
-                      <td className="small">{shares(curve.filled)} / {shares(curve.strategy.maxShares)}</td>
-                      <td className="small"><Address value={curve.maker} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>}
-      <p className="small muted" style={{ marginTop: '.75rem' }}>
-        A limit order holds one price. A pricing curve moves its price as it fills — down as a buyer accumulates, up as a seller
-        distributes. A maker's USDC is shared with their other markets, so listed depth is an upper bound.
-      </p>
-    </Card>
   );
 }
 
@@ -104,12 +71,14 @@ const label = (side: Side) => `${side.isBuy ? 'Buy' : 'Sell'} ${side.isYes ? 'YE
  * order rests at the maker's own price until someone fills it. Underneath, the limit order is an
  * Aqua order whose start and end prices are equal, which is what the contract treats as fixed.
  */
-function OrderTicket({ market, book, onDone }: { market: string; book: Market['liquidity']; onDone: () => void }) {
+function OrderTicket({ market, book, isYes, onOutcome, onDone }: {
+  market: string; book: Market['liquidity']; isYes: boolean; onOutcome: (isYes: boolean) => void; onDone: () => void;
+}) {
   const wallet = useWallet();
   const [type, setType] = useState<OrderType>('market');
-  const [side, setSide] = useState<Side>({ isYes: true, isBuy: true });
-  const outcome = side.isYes ? book.yes : book.no;
-  const change = (patch: Partial<Side>) => setSide({ ...side, ...patch });
+  const [isBuy, setIsBuy] = useState(true);
+  const side: Side = { isYes, isBuy };
+  const outcome = isYes ? book.yes : book.no;
 
   return (
     <Card title="Trade">
@@ -121,12 +90,12 @@ function OrderTicket({ market, book, onDone }: { market: string; book: Market['l
         ))}
       </div>
       <div className="seg">
-        <button className={side.isBuy ? 'yes' : ''} onClick={() => change({ isBuy: true })}>Buy</button>
-        <button className={!side.isBuy ? 'no' : ''} onClick={() => change({ isBuy: false })}>Sell</button>
+        <button className={isBuy ? 'yes' : ''} onClick={() => setIsBuy(true)}>Buy</button>
+        <button className={!isBuy ? 'no' : ''} onClick={() => setIsBuy(false)}>Sell</button>
       </div>
       <div className="seg">
-        <button className={side.isYes ? 'active' : ''} onClick={() => change({ isYes: true })}>YES</button>
-        <button className={!side.isYes ? 'active' : ''} onClick={() => change({ isYes: false })}>NO</button>
+        <button className={isYes ? 'active' : ''} onClick={() => onOutcome(true)}>YES</button>
+        <button className={!isYes ? 'active' : ''} onClick={() => onOutcome(false)}>NO</button>
       </div>
       <div className="book small muted">
         <span>Best ask <strong>{price(outcome.ask)}</strong></span>
@@ -167,26 +136,40 @@ function MarketOrder({ market, side, account, onDone, onSwitchToLimit }: {
     } catch (issue) { return { error: issue instanceof Error ? issue.message : 'Invalid amount.' }; }
   }, [size]);
 
-  // A market order prices itself as you type, the way an exchange ticket does. The request is
-  // debounced because each quote refreshes chain state and simulates the whole route.
+  // A market order prices itself as you type, the way an exchange ticket does. Each quote refreshes
+  // chain state and simulates the whole route, so requests are debounced and single-flight: while
+  // one is running the newest inputs wait for it, then supersede it. Firing on every keystroke
+  // would queue work the trader has already moved past and exhaust the service's own capacity.
+  const inFlight = useRef(false);
+  const wanted = useRef<string | undefined>(undefined);
   useEffect(() => {
     setQuote(undefined); setError(undefined); setTx({ phase: 'idle' });
-    if (!account || shareAmount.error || !shareAmount.value) return;
-    const shares = shareAmount.value;
-    let cancelled = false;
+    if (!account || shareAmount.error || !shareAmount.value) { wanted.current = undefined; return; }
+    const request = { market, account, recipient: account, isYes: side.isYes, isBuy: side.isBuy,
+      shares: shareAmount.value.toString(), slippageBps };
+    const key = JSON.stringify(request);
+    wanted.current = key;
     setPending(true);
-    const timer = setTimeout(() => {
-      api.quote({ market, account, recipient: account, isYes: side.isYes, isBuy: side.isBuy, shares: shares.toString(), slippageBps })
-        .then(result => { if (!cancelled) setQuote(result); },
-          issue => {
-            if (cancelled) return;
-            setError(issue instanceof ApiError
-              ? { code: issue.code, message: describeQuoteError(issue.code) }
-              : { code: 'unknown', message: issue instanceof Error ? issue.message : 'Pricing failed.' });
-          })
-        .finally(() => { if (!cancelled) setPending(false); });
-    }, 700);
-    return () => { cancelled = true; clearTimeout(timer); setPending(false); clearTimeout(timer); };
+    const run = async () => {
+      if (inFlight.current || wanted.current !== key) return;
+      inFlight.current = true;
+      try {
+        const result = await api.quote(request);
+        if (wanted.current === key) { setQuote(result); setPending(false); }
+      } catch (issue) {
+        if (wanted.current === key) {
+          setError(issue instanceof ApiError
+            ? { code: issue.code, message: describeQuoteError(issue.code) }
+            : { code: 'unknown', message: issue instanceof Error ? issue.message : 'Pricing failed.' });
+          setPending(false);
+        }
+      } finally {
+        inFlight.current = false;
+        if (wanted.current !== key) void run();
+      }
+    };
+    const timer = setTimeout(() => void run(), 700);
+    return () => clearTimeout(timer);
   }, [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString()]);
 
   const expired = quote ? quote.deadline <= now : false;

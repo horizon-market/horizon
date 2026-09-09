@@ -88,7 +88,7 @@ export function tradingRoutes(config?: TradingConfig) {
     if (!service) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     const input = quoteSchema.safeParse(req.body);
     if (!input.success) { res.status(400).json({ error: 'invalid_quote_request' }); return; }
-    if (activeQuotes >= 2) { res.status(429).json({ error: 'quote_capacity' }); return; }
+    if (activeQuotes >= 4) { res.status(429).json({ error: 'quote_capacity' }); return; }
     activeQuotes++;
     try { res.json(serialize(await service.quote(input.data))); }
     catch { res.status(409).json({ error: 'quote_unavailable_refresh_or_check_liquidity' }); }

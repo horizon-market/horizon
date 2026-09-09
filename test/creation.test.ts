@@ -8,7 +8,7 @@ import { DevelopmentDraftProvider } from '../src/creation/ai.js';
 import { decodePayment, buildRequirements, paymentMatches, SimulatedFacilitator, PaymentPayloadError } from '../src/payments/x402.js';
 import { createRpContext, createVerifier, proofSchema, UnavailableVerifier, VerificationRejectedError, VerificationUnavailableError, WorldSelfieVerifier } from '../src/world/verifier.js';
 import { hashSignal } from '@worldcoin/idkit-core/hashing';
-import { summarize } from '../src/trading/liquidity.js';
+import { buildBook, summarize } from '../src/trading/liquidity.js';
 import { marginalPrice } from '../src/trading/math.js';
 import type { PaymentsConfig } from '../src/config.js';
 
@@ -166,6 +166,46 @@ test('a World proof is refused unless it is bound to this action, environment an
     (error: unknown) => error instanceof VerificationRejectedError);
   await assert.rejects(() => verifier.verify(proof(), requestId),
     (error: unknown) => error instanceof VerificationUnavailableError);
+});
+
+test('one outcome\'s book restates the other outcome\'s orders at one minus their price', () => {
+  const market = '0x4444444444444444444444444444444444444444' as const;
+  const salt = `0x${'11'.repeat(32)}` as const;
+  const flat = (isYes: boolean, isBuy: boolean, price: number, size: bigint, filled = 0n, id = `0x${'ab'.repeat(32)}` as const) => ({
+    id, maker: market, filled,
+    strategy: { market, flags: 4 + (isBuy ? 2 : 0) + (isYes ? 1 : 0), startPrice: price, endPrice: price, maxShares: size, salt },
+  });
+  const book = buildBook([
+    flat(true, false, 620_000, 3_000_000n, 0n, `0x${'01'.repeat(32)}`),  // SELL YES 0.62
+    flat(true, true, 550_000, 2_000_000n, 0n, `0x${'02'.repeat(32)}`),   // BUY YES 0.55
+    flat(false, true, 380_000, 4_000_000n, 0n, `0x${'03'.repeat(32)}`),  // BUY NO 0.38 -> YES ask 0.62
+    flat(false, false, 300_000, 5_000_000n, 0n, `0x${'04'.repeat(32)}`), // SELL NO 0.30 -> YES bid 0.70
+    flat(true, false, 900_000, 1_000_000n, 1_000_000n, `0x${'05'.repeat(32)}`), // exhausted, excluded
+  ]);
+
+  // A resting BUY NO is an executable YES ask at 1 - price, and merges into the same level as
+  // a direct SELL YES quoting that price.
+  assert.deepEqual(book.yes.asks.map(level => [level.price, level.shares.toString(), level.orders, level.source, level.executable]), [
+    [620_000, '7000000', 2, 'mixed', true],
+  ]);
+  // A resting SELL NO restates as a YES bid, but filling it needs sell-and-merge routing.
+  assert.deepEqual(book.yes.bids.map(level => [level.price, level.shares.toString(), level.source, level.executable]), [
+    [700_000, '5000000', 'complementary', false],
+    [550_000, '2000000', 'direct', true],
+  ]);
+  // The spread ignores depth that cannot be filled today.
+  assert.equal(book.yes.spread, 620_000 - 550_000);
+
+  // The NO book is the exact mirror.
+  assert.deepEqual(book.no.asks.map(level => [level.price, level.source, level.executable]), [
+    [300_000, 'direct', true],
+    [450_000, 'complementary', true],
+  ]);
+  assert.deepEqual(book.no.bids.map(level => [level.price, level.source, level.executable]), [
+    [380_000, 'direct', true],
+    [380_000, 'complementary', false],
+  ]);
+  assert.equal(book.no.spread, 300_000 - 380_000);
 });
 
 test('indexed liquidity treats complementary buy curves as available depth for the other outcome', () => {

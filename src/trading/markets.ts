@@ -2,7 +2,7 @@ import { createPublicClient, http, erc20Abi, encodeAbiParameters, parseAbiParame
 import { sepolia } from 'viem/chains';
 import { GraphProvider, type IndexedMarket } from './graph.js';
 import { cumulative, type Curve } from './math.js';
-import { summarize, type MarketLiquidity } from './liquidity.js';
+import { buildBook, summarize, type MarketLiquidity } from './liquidity.js';
 import { aquaAbi, marketAbi, registryAbi, routerAbi } from './abi.js';
 import type { TradingConfig } from './service.js';
 
@@ -52,6 +52,7 @@ export class MarketService {
     if (!registered) throw new MarketError('unknown_market');
     const [summary] = this.decorate([{ ...indexed, result, collateral }]);
     return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
+      book: buildBook(indexed.curves),
       market: { ...summary!, status: result !== 0 ? 'RESOLVED' : isOpen ? 'OPEN' : 'CLOSED', chainConfirmed: true } };
   }
 
