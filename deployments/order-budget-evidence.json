@@ -1,0 +1,72 @@
+{
+  "router": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+  "market": "0xbc7c4cc7e0f944053bfa0607592ef4cf215c758e",
+  "maker": "0x243fBaeE0E81EfbC5900F0934f6f4Aa66a249D31",
+  "steps": [
+    {
+      "note": "before",
+      "spendable": "7750000",
+      "committed": "0",
+      "available": "7750000",
+      "orders": 0
+    },
+    {
+      "label": "A ship ",
+      "hash": "0xe9b801444b9192df3e367adce3b14c356a8ddf37c3a9ff576278af2a69a67562",
+      "status": "success"
+    },
+    {
+      "label": "A admit",
+      "hash": "0x90e52b4fc4b6d825a4fbe698a68d092bc52d7c9ee41e633e67b8c2570590a6e5",
+      "status": "success"
+    },
+    {
+      "note": "after A",
+      "spendable": "7750000",
+      "committed": "7750000",
+      "available": "0",
+      "orders": 1
+    },
+    {
+      "label": "B ship ",
+      "hash": "0x72c1af4d50709ccb57bb8b22257b0a612048185bcd63df13c86bfd3f73edb6ac",
+      "status": "success"
+    },
+    {
+      "note": "B admission refused on chain",
+      "refusal": "The contract function \"admitCurve\" reverted with the following signature:\n0x90ac6f09\n\nUnable to decode signature \"0x90ac6f09\" as it was not found on the provided ABI.\nMake sure you are using the corre"
+    },
+    {
+      "note": "after B ship (unadmitted commits nothing)",
+      "spendable": "7750000",
+      "committed": "7750000",
+      "available": "0",
+      "orders": 1
+    },
+    {
+      "label": "A dock ",
+      "hash": "0x12c16730ad67d6cfe355964986b76cc46ff3e905a9f91df0de4097cc8cee0f24",
+      "status": "success"
+    },
+    {
+      "label": "B dock ",
+      "hash": "0x2e900ea408e38742cdb03c995d76064b658426c800235e3ed26020f53672bf7e",
+      "status": "success"
+    },
+    {
+      "note": "after unwind",
+      "spendable": "7750000",
+      "committed": "0",
+      "available": "7750000",
+      "orders": 0
+    }
+  ],
+  "orderBudget": "0x563D51c62260F484C5765712fd9716704cF266A2",
+  "executor": "0x657b5cf110bed745c5b3f33c77d61855abb4cfa9",
+  "verifiedAt": "2026-09-10",
+  "refusalSelector": {
+    "0x90ac6f09": "MarketBudgetExceeded(address,uint256,uint256,uint256)"
+  },
+  "releaseClosed": "0x261b12b03920626dbb821b3a40bc85600e309a49e4f460406e9128fb17620d83",
+  "summary": "Live check on Sepolia. Order A committed exactly the wallet\u2019s whole approved USDC budget (25 shares at 0.31 = 7.75 USDC) and left zero capacity. Order B, owing one base unit, was accepted by Aqua\u2019s ship and refused by the router\u2019s admitCurve with MarketBudgetExceeded. While shipped but unadmitted it committed nothing. Docking both released every commitment, and releaseClosed freed their slots, leaving the wallet as it was found."
+}

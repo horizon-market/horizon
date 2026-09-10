@@ -183,41 +183,77 @@ The demo prints a local EVM trace of Aqua authorization, a 0.60/0.40 match, full
 
 The macOS sandbox prevented PostgreSQL shared-memory initialization and caused Foundry's OS proxy lookup to crash; those commands succeeded outside the sandbox. These were environment limitations, not passing results inferred from failed tests.
 
-## Per-market order budgets: required redeployment
+## Per-market order budgets: deployed September 10, 2026
 
 The order-budget rule is enforced on chain by `OrderBudget`, a ledger that `HorizonSwapVM` deploys
-and owns, and `HorizonSwapVM` refuses to fill any order it has not admitted. **This is a contract
-change, so it takes a new router.** Until it is deployed and wired, the API refuses to prepare curve
-publications with `order_budget_unavailable` (HTTP 503) rather than reporting an unknown budget as an
-empty one. That refusal is deliberate: a silent fallback would permit exactly what the rule prevents.
+and owns, and `HorizonSwapVM` refuses to fill any order it has not admitted. That took a new router,
+which is deployed and wired:
 
-Nothing here has been broadcast. The deployment step is:
+| Contract | Address |
+| --- | --- |
+| `HorizonSwapVM` | `0x2b7592171cc7cfaa21dd60b49c81d68cf584302d` |
+| `OrderBudget` | `0x563D51c62260F484C5765712fd9716704cF266A2` |
+| `RouteExecutor` | `0x657b5cf110bed745c5b3f33c77d61855abb4cfa9` |
+| `MarketRegistry` | `0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1` — unchanged |
+| Subgraph | Studio `0.3.1`, `https://api.studio.thegraph.com/query/1758973/horizon/0.3.1` |
+
+`deploy:phase2` skips contracts already recorded in `deployments/sepolia.json`, so the router and
+executor were cleared from it first and moved to `superseded`. The registry was deliberately left in
+place: clearing it too would have created a second registry and orphaned every existing market.
+`startBlock` is likewise unchanged, so the Subgraph still indexes markets created before the change.
+
+`.env` was updated in place with `HORIZON_ROUTER_ADDRESS`, `HORIZON_EXECUTOR_ADDRESS` and
+`GRAPH_QUERY_URL`. **Restart the API and worker** so they pick them up.
+
+Verified after deployment, not merely broadcast: the router names the registry and Aqua, the
+executor names the router, and `router.budget()` and `budget.app()` name each other. A live check
+then admitted an order committing exactly the wallet's whole approved USDC budget, had a further
+one-base-unit order refused on chain with `MarketBudgetExceeded` (`0x90ac6f09`), confirmed that the
+shipped-but-unadmitted order committed nothing, and docked both to leave the wallet as it was found.
+Transactions: `deployments/order-budget-evidence.json`.
+
+The indexer then showed the same two orders as `admitted: true` and `admitted: false`, which is the
+direct-Aqua publication case end to end: Aqua accepted both, the router accepted one, and only the
+admitted one is served as depth.
+
+**Indexer lag to watch.** `0.3.1` had backfilled all eleven markets and was ~130 blocks behind the
+head when this was written, advancing slowly for the reason above. `QuoteService` rejects a snapshot
+more than 64 blocks behind with `stale_graph`, so market orders will refuse to price until it closes
+the gap. Publication, cancellation, redemption and the budget endpoint do not read the indexer at
+all and are unaffected.
+
+To repeat the whole sequence elsewhere:
 
 ```sh
 npm run contracts:test          # 54 tests, including test/OrderBudget.t.sol
 npm run test:routes             # both Anvil suites, including the enforcement boundary
-npm run deploy:phase2           # deploys MarketRegistry, HorizonSwapVM and RouteExecutor
-npm run subgraph:prepare && npm run subgraph:codegen && npm run subgraph:deploy
 npm run db:migrate              # adds CurveProjection.admitted
+npm run deploy:phase2           # clear router/executor from deployments/sepolia.json first
+npm run subgraph:prepare && npm run subgraph:codegen && npm run subgraph:deploy
 ```
 
-`deploy:phase2` reads `router.budget()`, checks the ledger names that router as its `app`, and
-records the address in `deployments/sepolia.json` as `orderBudget`. Nothing configures it: the
-router deploys its own ledger, so the two cannot disagree and no environment variable can point at
-the wrong one. `RouteExecutor` holds the router immutably and is redeployed with it.
-
-Notes for whoever runs it:
+Notes for whoever runs it next:
 
 - `HorizonSwapVM` is **23,514 bytes**, 1,062 under the EIP-170 limit. Check
-  `forge build --root contracts --sizes` before adding to it.
+  `forge build --root contracts --sizes` before adding to it; the deploy script refuses an
+  oversized artifact rather than discovering it on chain.
+- `GRAPH_SUBGRAPH_VERSION` sets the Studio version label and defaults to `0.3.0`. Studio will not
+  reuse a label, and a schema change needs a full re-index, so bump it every time.
+- **Archive superseded versions in Studio.** `0.3.0` was deployed with every data source starting at
+  the registry's block, which made the Aqua source rescan ~12,600 blocks calling a router that did
+  not exist yet for every `Shipped` event; it crawled and was replaced by `0.3.1`, which starts the
+  router-facing sources at `routerBlock`. Studio keeps indexing the superseded version and the two
+  compete for a free-tier slot, so `0.3.1` is currently syncing slowly. Archiving `0.3.0` in the
+  Studio web UI frees that capacity — there is no CLI or API for it.
 - Curves published to the previous router stay on the previous router. They are not migrated, and
-  the new subgraph indexes only orders admitted to the new one.
-- Publication is now two transactions for the maker: `Aqua.ship`, then
-  `HorizonSwapVM.admitCurve`. The frontend runs both and, if the second fails, resumes at the
-  admission rather than shipping a second allocation.
-- The subgraph adds `Strategy.admitted` and derives it from the router's `StrategyAdmitted` event.
-  Discovery queries filter `active: true, admitted: true`, so re-indexing from `startBlock` is
-  required — a partially indexed subgraph would show no depth rather than wrong depth.
+  the Subgraph indexes only orders admitted to the new one — expect the market pages to show no
+  resting liquidity until makers republish.
+- Publication is now two transactions for the maker: `Aqua.ship`, then `HorizonSwapVM.admitCurve`.
+  The frontend runs both and, if the second fails, resumes at the admission rather than shipping a
+  second allocation. An order stuck between the two appears in the Portfolio as **Not published**
+  and can be cancelled to recover the allocation.
+- Aqua allowances are per spender, not per router, so a maker's existing USDC approval to Aqua
+  carries over to the new router unchanged.
 
 ## Sponsor readiness
 

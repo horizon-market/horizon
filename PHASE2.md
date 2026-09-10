@@ -5,11 +5,13 @@ Verified September 9, 2026 (local time). The Phase 2 exit is complete: a live Gr
 ## Public deployment
 
 - Registry: `0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1`
-- HorizonSwapVM: `0xf155c2ad43d020b601ee51a7e086112a5d00240f`
-- RouteExecutor: `0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4`
+- HorizonSwapVM: `0x2b7592171cc7cfaa21dd60b49c81d68cf584302d` (redeployed September 10, 2026 for per-market order budgets)
+- OrderBudget: `0x563D51c62260F484C5765712fd9716704cF266A2` (deployed and owned by the router)
+- RouteExecutor: `0x657b5cf110bed745c5b3f33c77d61855abb4cfa9`
+- Superseded by that redeployment, kept for reference: HorizonSwapVM `0xf155c2ad43d020b601ee51a7e086112a5d00240f`, RouteExecutor `0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4`. The registry is unchanged, so markets created before it still exist; orders published to the old router stay there and are not migrated.
 - Official AquaRouter: `0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a`
 - Circle Sepolia USDC: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`
-- [Live Subgraph query endpoint](https://api.studio.thegraph.com/query/1758973/horizon/0.2.0), Studio version `0.2.0`. This is a working Studio deployment, not a claim of decentralized-network publication.
+- [Live Subgraph query endpoint](https://api.studio.thegraph.com/query/1758973/horizon/0.3.1), Studio version `0.3.1`. This is a working Studio deployment, not a claim of decentralized-network publication.
 - [Atomic two-curve transaction](https://sepolia.etherscan.io/tx/0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba).
 
 The configured Aqua deployment is `AquaRouter`, which wraps `Aqua` with upstream simulation, multicall, and rescue functions. Sourcify reports an exact runtime match. Its Aqua core, IAqua interface, and Balance library match the vendored source byte for byte. Its different compiler settings and wrapper explain why comparison against our locally compiled bare Aqua did not match. [Aqua verification](deployments/aqua-verification.json) records the source provenance and observed runtime hash.

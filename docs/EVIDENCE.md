@@ -8,8 +8,15 @@ Everything below was verified against live networks. Anything not yet proven is 
 | Contract | Address | Deployment transaction |
 | --- | --- | --- |
 | `MarketRegistry` | [`0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1`](https://sepolia.etherscan.io/address/0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1) | [`0x7bb78c17…`](https://sepolia.etherscan.io/tx/0x7bb78c175b6406d051977cb6b4e52bef40c1dbe080acf044d2b0e8b6cf4b9538) |
-| `HorizonSwapVM` | [`0xf155c2ad43d020b601ee51a7e086112a5d00240f`](https://sepolia.etherscan.io/address/0xf155c2ad43d020b601ee51a7e086112a5d00240f) | [`0x5b11e74f…`](https://sepolia.etherscan.io/tx/0x5b11e74f86ded8717243adf51d1b11519c8a320951196c7937e50b1f5425275b) |
-| `RouteExecutor` | [`0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4`](https://sepolia.etherscan.io/address/0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4) | [`0xc705bc81…`](https://sepolia.etherscan.io/tx/0xc705bc81e11dd1df4a7e3d32b908b1cdf070819676468b3bd3df43e400a01138) |
+| `HorizonSwapVM` | [`0x2b7592171cc7cfaa21dd60b49c81d68cf584302d`](https://sepolia.etherscan.io/address/0x2b7592171cc7cfaa21dd60b49c81d68cf584302d) | [`0x0313620a…`](https://sepolia.etherscan.io/tx/0x0313620a3f4530f599df4f4e734233944e0920aff49c01279dc9e855a6061c93) |
+| `OrderBudget` | [`0x563D51c62260F484C5765712fd9716704cF266A2`](https://sepolia.etherscan.io/address/0x563D51c62260F484C5765712fd9716704cF266A2) | deployed by the router in the same transaction |
+| `RouteExecutor` | [`0x657b5cf110bed745c5b3f33c77d61855abb4cfa9`](https://sepolia.etherscan.io/address/0x657b5cf110bed745c5b3f33c77d61855abb4cfa9) | [`0x8073fe02…`](https://sepolia.etherscan.io/tx/0x8073fe029908ce6f2afca8da9bfb66df9a3d979166e4dfd10e7fd1c3b9f11013) |
+
+The router and executor were redeployed on September 10, 2026 to enforce per-market order budgets.
+The registry is unchanged, so every market created before then still exists and still resolves.
+Orders published to the superseded router `0xf155c2ad43d020b601ee51a7e086112a5d00240f` stay
+there and are not migrated; the current Subgraph indexes only the router above. The previous
+addresses are kept in `deployments/sepolia.json` under `superseded`.
 
 Dependencies, not deployed by this project: official 1inch Aqua router
 `0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a` and Circle test USDC
@@ -19,15 +26,32 @@ for byte. `deployments/aqua-verification.json` records the provenance and observ
 and `npm run doctor` re-checks the live runtime hash against it.
 
 Wiring verified on chain: the router points at the registry and at Aqua, the executor points at
-the router, and the registry points at USDC.
+the router, and the registry points at USDC. The router also deploys and owns `OrderBudget`, and
+the two name each other — `router.budget()` and `budget.app()` — so no configuration can point at
+the wrong ledger.
+
+### Per-market order budgets, checked live
+
+A maker order is published in two steps: `Aqua.ship`, then `HorizonSwapVM.admitCurve`. The router
+refuses to fill any order it has not admitted, which is what makes the budget rule binding rather
+than advisory — `Aqua.ship` has no application callback, so anyone can publish a strategy naming
+the router without asking Horizon.
+
+On September 10, 2026 against the deployed contracts: an order committing exactly the wallet's whole
+approved USDC budget was admitted and left zero capacity; a further order owing **one base unit** was
+accepted by `Aqua.ship` and refused by `admitCurve` with `MarketBudgetExceeded` (`0x90ac6f09`). While
+shipped but unadmitted it committed nothing. Docking both released every commitment. Transactions
+and figures at each step: [`deployments/order-budget-evidence.json`](../deployments/order-budget-evidence.json).
 
 ## Indexing
 
-Subgraph Studio version `0.2.0`, queried live at
-`https://api.studio.thegraph.com/query/1758973/horizon/0.2.0`. This is a working Studio
+Subgraph Studio version `0.3.1`, queried live at
+`https://api.studio.thegraph.com/query/1758973/horizon/0.3.1`. This is a working Studio
 deployment, not a claim of decentralized-network publication. It indexes markets, curves, fills,
 routes, collateral and resolution, and validates Aqua publications against the deployed router
-rather than trusting arbitrary `Shipped` bytes.
+rather than trusting arbitrary `Shipped` bytes. It also records `Strategy.admitted` from the
+router's `StrategyAdmitted` event, and discovery serves only orders that are both active and
+admitted — so a strategy shipped straight to Aqua is never presented as depth.
 
 ## Trading — atomic two-curve route
 

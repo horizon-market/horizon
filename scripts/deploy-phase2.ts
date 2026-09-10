@@ -4,7 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
 import { routerAbi, routeAbi, orderBudgetAbi, registryAbi } from '../src/trading/abi.js';
 
-type Deployment = { chainId: number; owner: Address; aqua: Address; usdc: Address; startBlock?: string; registry?: Address; router?: Address; executor?: Address; orderBudget?: Address; transactions: Record<string, Hex>; pending?: { name: string; address: Address; nonce: number; hash?: Hex } };
+type Deployment = { chainId: number; owner: Address; aqua: Address; usdc: Address; startBlock?: string; routerBlock?: string; registry?: Address; router?: Address; executor?: Address; orderBudget?: Address; transactions: Record<string, Hex>; pending?: { name: string; address: Address; nonce: number; hash?: Hex } };
 const path = 'deployments/sepolia.json';
 async function main() {
   if (!process.argv.includes('--broadcast')) throw new Error('Pass --broadcast to deploy to Sepolia');
@@ -58,6 +58,9 @@ async function main() {
     state[key] = receipt.contractAddress;
     state.transactions[name] = receipt.transactionHash;
     state.startBlock ??= receipt.blockNumber.toString();
+    // The indexer scans the registry from the beginning but everything router-facing from here:
+    // no Aqua publication can name a router that did not exist yet.
+    if (key === 'router') state.routerBlock = receipt.blockNumber.toString();
     delete state.pending; await save();
     console.log(`${name}: ${receipt.contractAddress}`);
     return receipt.contractAddress;
