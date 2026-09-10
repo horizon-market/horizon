@@ -9,78 +9,190 @@ datasource db {
 
 // Service metadata only. Markets and collateral will remain authoritative on-chain.
 model CreationRequest {
-  id             String   @id @default(uuid()) @db.Uuid
-  idempotencyKey String   @unique
-  question       String
-  requesterKind  String
-  status         String   @default("DRAFT")
+  id              String       @id @default(uuid()) @db.Uuid
+  idempotencyKey  String       @unique
+  question        String
+  requesterKind   String
+  status          String       @default("DRAFT")
   // Requester identity and a hashed per-request bearer token. The plaintext token is
   // returned exactly once and never stored, so admin database access cannot resume a request.
-  requester       String  @default("")
-  accessTokenHash String  @default("")
+  requester       String       @default("")
+  accessTokenHash String       @default("")
+  // A request creates one standalone market (SINGLE) or the children of one event (GROUP).
+  // Existing rows predate grouping and default to SINGLE, so their behaviour is unchanged.
+  kind            String       @default("SINGLE")
+  eventId         String?      @db.Uuid
+  event           MarketEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
   // The exact draft a human reviewed. approvedHash must equal draftHash before payment.
-  draft         Json?
-  draftHash     String?
-  draftProvider String?
-  draftMode     String?
-  duplicates    Json?
-  approvedAt    DateTime?
-  approvedHash  String?
+  draft           Json?
+  draftHash       String?
+  draftProvider   String?
+  draftMode       String?
+  duplicates      Json?
+  approvedAt      DateTime?
+  approvedHash    String?
   // Discount and price are decided server-side when payment requirements are issued.
-  discountBps   Int      @default(0)
-  discountNote  String   @default("")
-  priceUnits    String   @default("0")
-  marketAddress String?
-  creationTxHash String?
-  failureCode   String?
-  failureDetail String?
-  attempts      Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  discountBps     Int          @default(0)
+  discountNote    String       @default("")
+  priceUnits      String       @default("0")
+  marketAddress   String?
+  creationTxHash  String?
+  failureCode     String?
+  failureDetail   String?
+  attempts        Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   payment      PaymentIntent?
   verification HumanVerification?
+  children     CreationChild[]
 
   @@index([status, createdAt])
   // A requester reads back their own creation history; the portfolio lists it newest first.
   @@index([requester, createdAt])
+  @@index([eventId])
+}
+
+// ---------------------------------------------------------------------------
+// Events and their children. This is service metadata, exactly like the draft
+// above it: an event is a durable Horizon-owned grouping and a record of where
+// its definitions came from. It is never a projection of chain state, and an
+// imported market only becomes a real market once a child of it is deployed and
+// The Graph indexes it. Every child stays an independent binary market with its
+// own contracts, collateral, trading and resolution.
+// ---------------------------------------------------------------------------
+model MarketEvent {
+  id               String    @id @default(uuid()) @db.Uuid
+  // Stable, human-readable address for /events/:slug. Independent of any source slug.
+  slug             String    @unique
+  title            String
+  description      String    @default("")
+  category         String    @default("")
+  // string[]; imported from the source's tags or entered manually.
+  tags             Json?
+  imageUrl         String?
+  iconUrl          String?
+  // COLLECTION: membership implies nothing about the children's outcomes.
+  // EXCLUSIVE: the source or author states that exactly one child resolves YES.
+  // Enforcement of EXCLUSIVE is in the resolution workflow only; see MarketEvent notes
+  // in docs/ARCHITECTURE.md. Nothing about it is enforced by the market contracts.
+  exclusivity      String    @default("COLLECTION")
+  exclusivityNote  String    @default("")
+  // Whether the imported children cover every outcome the source offered. A partial
+  // selection is never presented as an exhaustive outcome set.
+  outcomesComplete Boolean   @default(false)
+  // Provenance. `horizon` for a manually authored event; `polymarket` for an import.
+  sourceProvider   String    @default("horizon")
+  sourceEventId    String?
+  sourceSlug       String?
+  sourceUrl        String?
+  importedAt       DateTime?
+  // The definitional metadata exactly as the source returned it. Source prices,
+  // liquidity, volume and order-book fields are deliberately excluded: they are not
+  // Horizon data and must never reach a Horizon surface.
+  sourceSnapshot   Json?
+  // DRAFT while its creation request is still in flight; ACTIVE once a child is deployed.
+  status           String    @default("DRAFT")
+  createdBy        String    @default("")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  members  EventMarket[]
+  requests CreationRequest[]
+
+  // One Horizon event per source event, which is what makes an import idempotent
+  // under concurrent requests and retries.
+  @@unique([sourceProvider, sourceEventId])
+  @@index([status, createdAt])
+}
+
+// One child of an event: its outcome label, its order, and the market it became.
+model EventMarket {
+  id             String      @id @default(uuid()) @db.Uuid
+  eventId        String      @db.Uuid
+  event          MarketEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  position       Int
+  outcomeLabel   String
+  question       String
+  // Set once this child is deployed. Unique across every event, so a market belongs to
+  // at most one event and browsing can never render it as two cards.
+  marketAddress  String?     @unique
+  sourceMarketId String?
+  sourceSlug     String?
+  sourceUrl      String?
+  sourceSnapshot Json?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([eventId, position])
+  @@unique([eventId, sourceMarketId])
+  @@index([marketAddress])
+}
+
+// Per-child deployment state inside one creation request. A retry redeploys only the
+// children that are not already CREATED, so a partial failure never recreates a market
+// and never charges again: the payment intent above is settled once, for the request.
+model CreationChild {
+  id             String          @id @default(uuid()) @db.Uuid
+  requestId      String          @db.Uuid
+  request        CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  position       Int
+  outcomeLabel   String
+  // The exact reviewed MarketDraft for this child; the request's approval hash covers it.
+  draft          Json
+  draftHash      String
+  // PENDING | SKIPPED | CREATING | CREATED | FAILED. SKIPPED children were deselected
+  // before approval and are neither priced nor deployed.
+  status         String          @default("PENDING")
+  marketAddress  String?
+  creationTxHash String?
+  failureCode    String?
+  failureDetail  String?
+  attempts       Int             @default(0)
+  // Warnings the importer raised for this child, preserved with the reviewed draft.
+  notes          Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([requestId, position])
+  @@index([status])
 }
 
 // Exactly one payment intent per creation request; retries reuse it and never re-settle.
 model PaymentIntent {
-  id             String   @id @default(uuid()) @db.Uuid
-  requestId      String   @unique @db.Uuid
+  id             String          @id @default(uuid()) @db.Uuid
+  requestId      String          @unique @db.Uuid
   request        CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  status         String   @default("REQUIRED")
-  scheme         String   @default("exact")
+  status         String          @default("REQUIRED")
+  scheme         String          @default("exact")
   network        String
   asset          String
   amountUnits    String
   payTo          String
-  nonce          String   @unique
+  nonce          String          @unique
   facilitator    String
-  payloadHash    String?  @unique
-  transactionRef String?  @unique
+  payloadHash    String?         @unique
+  transactionRef String?         @unique
   payer          String?
   verifiedAt     DateTime?
   settledAt      DateTime?
   failureCode    String?
-  attempts       Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  attempts       Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([status])
 }
 
 // Minimum retained verification result: no image, document or raw proof is stored.
 model HumanVerification {
-  id             String   @id @default(uuid()) @db.Uuid
-  requestId      String   @unique @db.Uuid
+  id             String          @id @default(uuid()) @db.Uuid
+  requestId      String          @unique @db.Uuid
   request        CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   nullifierHash  String
   credentialType String
   verifier       String
-  verifiedAt     DateTime @default(now())
+  verifiedAt     DateTime        @default(now())
 
   @@index([nullifierHash])
 }
@@ -101,6 +213,9 @@ model MarketResolution {
   id          String   @id @default(uuid()) @db.Uuid
   market      String   @unique
   result      String
+  // Set when the market is a child of an explicitly exclusive event. Recorded so a
+  // pending sibling resolution is visible to the next consistency check.
+  eventId     String?  @db.Uuid
   evidence    String
   status      String   @default("PENDING")
   txHash      String?
@@ -109,6 +224,8 @@ model MarketResolution {
   requestedBy String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([eventId, result])
 }
 
 // Append-only record of deliberate administrative actions.
@@ -173,7 +290,7 @@ model MarketProjection {
 }
 
 model CurveProjection {
-  id            String   @id
+  id            String           @id
   marketAddress String
   market        MarketProjection @relation(fields: [marketAddress], references: [address], onDelete: Cascade)
   maker         String
@@ -186,7 +303,7 @@ model CurveProjection {
   active        Boolean
   publishedAt   DateTime
   indexedBlock  Int
-  syncedAt      DateTime @default(now())
+  syncedAt      DateTime         @default(now())
 
   @@index([maker, publishedAt])
   @@index([marketAddress, active])

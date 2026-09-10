@@ -36,10 +36,15 @@ export type AiConfig = { provider: 'anthropic' | 'development'; apiKey?: string;
 export type CreationConfig = { rpc: string; registry: Address; resolver: Address; privateKey?: Hex; minCloseInSeconds: number; maxCloseInSeconds: number };
 
 export type MarketSyncConfig = { enabled: boolean; intervalMs: number; maxStalenessMs: number; pageSize: number };
+/**
+ * Definition imports. The API origin is fixed configuration, never something a request supplies:
+ * a user pastes a Polymarket page address and the backend fetches from this origin only.
+ */
+export type ImportsConfig = { enabled: boolean; polymarketApiOrigin: string; timeoutMs: number; maxChildren: number };
 
 export type Config = z.infer<typeof schema> & {
   trading?: TradingConfig; creation?: CreationConfig; payments: PaymentsConfig; world: WorldConfig; ai: AiConfig;
-  marketSync: MarketSyncConfig;
+  marketSync: MarketSyncConfig; imports: ImportsConfig;
 };
 
 const positiveInteger = (value: string | undefined, fallback: bigint) => {
@@ -64,8 +69,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const access = ['unknown', 'requested', 'granted'].includes(env.WORLD_SELFIE_ACCESS ?? '') ? env.WORLD_SELFIE_ACCESS as WorldConfig['access'] : 'unknown';
   const worldEnvironment = ['sandbox', 'staging', 'production'].includes(env.WORLD_ENVIRONMENT ?? '')
     ? env.WORLD_ENVIRONMENT as WorldConfig['environment'] : 'sandbox';
+  const importOrigin = env.POLYMARKET_API_ORIGIN || 'https://gamma-api.polymarket.com';
+  try {
+    const parsed = new URL(importOrigin);
+    if (parsed.protocol !== 'https:' && !['127.0.0.1', 'localhost'].includes(parsed.hostname)) throw new Error('insecure');
+  } catch { throw new Error('Invalid configuration: POLYMARKET_API_ORIGIN'); }
+  const maxImportChildren = Number(env.IMPORT_MAX_CHILDREN ?? '24');
+  if (!Number.isInteger(maxImportChildren) || maxImportChildren < 1 || maxImportChildren > 24) throw new Error('Invalid configuration: IMPORT_MAX_CHILDREN');
   const config: Config = {
     ...result.data,
+    imports: {
+      enabled: env.IMPORTS_ENABLED !== 'false',
+      polymarketApiOrigin: importOrigin, timeoutMs: 12_000, maxChildren: maxImportChildren,
+    },
     marketSync: {
       enabled: result.data.MARKET_SYNC_ENABLED, intervalMs: result.data.MARKET_SYNC_INTERVAL_MS,
       maxStalenessMs: result.data.MARKET_SYNC_MAX_STALENESS_MS, pageSize: result.data.MARKET_SYNC_PAGE_SIZE,

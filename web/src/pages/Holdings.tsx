@@ -1,12 +1,28 @@
 import { useState } from 'react';
-import { api, ApiError, type MakerCurve, type Position } from '../api';
+import { api, ApiError, type CreationSummary, type HorizonEvent, type MakerCurve, type Position } from '../api';
 import { navigate, useAsync, type Async } from '../hooks';
 import { useWallet } from '../App';
-import { Card, Empty, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { Badge, Card, Empty, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { CREATION_BADGE, CREATION_LABEL, activateCreation, creationToken, isFinished } from '../creations';
 import { ORDER_STATES, orderState, useCancelCurve, type OrderState } from '../orders';
 import { cumulative, type CurveShape } from '../curve';
-import { dateTime, priceUsdc, shares, timeLeft, usdc } from '../format';
+import { dateTime, formatUnits, priceUsdc, shares, timeLeft, usdc } from '../format';
 import { confirm, describeWalletError, send } from '../wallet';
+
+/** Which event a market belongs to, so a position or a request reads with its group context. */
+type EventIndex = Map<string, { slug: string; title: string; outcomeLabel: string }>;
+const indexEvents = (events: HorizonEvent[]): EventIndex => new Map(events.flatMap(event =>
+  event.children.filter(child => child.marketAddress).map(child =>
+    [child.marketAddress!.toLowerCase(), { slug: event.slug, title: event.title, outcomeLabel: child.outcomeLabel }] as const)));
+
+function EventLabel({ context }: { context: { slug: string; title: string; outcomeLabel: string } | undefined }) {
+  if (!context) return null;
+  return (
+    <div className="small muted">
+      {context.outcomeLabel} · <a href={`#/events/${context.slug}`}>{context.title}</a>
+    </div>
+  );
+}
 
 /**
  * Two things live here and they have different lifecycles: outcome tokens this account holds,
@@ -58,9 +74,13 @@ function postedUsdc(curve: MakerCurve): bigint {
 export function Holdings({ query }: { query: URLSearchParams }) {
   const wallet = useWallet();
   const account = wallet.account;
-  const tab = query.get('tab') === 'orders' ? 'orders' : 'positions';
+  const raw = query.get('tab');
+  const tab = raw === 'orders' ? 'orders' : raw === 'requests' ? 'requests' : 'positions';
   const positions = useAsync(async () => account ? api.positions(account) : { indexedBlock: 0, positions: [] as Position[] }, [account]);
   const orders = useAsync(async () => account ? api.makerCurves(account) : { indexedBlock: 0, curves: [] as MakerCurve[] }, [account]);
+  // Group context for both tabs. It is decoration, so a failure here must not fail the page.
+  const events = useAsync(async () => indexEvents((await api.events().catch(() => ({ events: [] as HorizonEvent[] }))).events), []);
+  const requests = useAsync(async () => account ? (await api.myCreations(account)).requests : [] as CreationSummary[], [account]);
 
   if (!account) {
     return (
@@ -79,6 +99,9 @@ export function Holdings({ query }: { query: URLSearchParams }) {
   const held = positions.data!.positions;
   const published = orders.data!.curves;
   const openOrders = published.filter(curve => orderState(curve) === 'open');
+  const grouped = events.data ?? new Map();
+  const myRequests = requests.data ?? [];
+  const resumable = myRequests.filter(entry => !isFinished(entry.status) && creationToken(entry.id));
 
   return (
     <div className="stack">
@@ -89,6 +112,13 @@ export function Holdings({ query }: { query: URLSearchParams }) {
 
       <Summary held={held} published={published} />
 
+      {resumable.length > 0 && tab !== 'requests' && (
+        <Notice kind="info">
+          You have {resumable.length} market request{resumable.length === 1 ? '' : 's'} still in progress.{' '}
+          <a href="#/holdings?tab=requests">Pick {resumable.length === 1 ? 'it' : 'one'} up</a>.
+        </Notice>
+      )}
+
       <div className="seg tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'positions'} className={tab === 'positions' ? 'active' : ''}
           onClick={() => navigate('/holdings')}>
@@ -98,11 +128,15 @@ export function Holdings({ query }: { query: URLSearchParams }) {
           onClick={() => navigate('/holdings?tab=orders')}>
           Orders <span className="count">{openOrders.length}</span>
         </button>
+        <button role="tab" aria-selected={tab === 'requests'} className={tab === 'requests' ? 'active' : ''}
+          onClick={() => navigate('/holdings?tab=requests')}>
+          Market requests <span className="count">{myRequests.length}</span>
+        </button>
       </div>
 
-      {tab === 'positions'
-        ? <Positions held={held} account={account} onDone={() => { positions.reload(); orders.reload(); }} />
-        : <Orders published={published} account={account} onDone={orders.reload} />}
+      {tab === 'positions' && <Positions held={held} account={account} events={grouped} onDone={() => { positions.reload(); orders.reload(); }} />}
+      {tab === 'orders' && <Orders published={published} account={account} events={grouped} onDone={orders.reload} />}
+      {tab === 'requests' && <Requests state={requests} />}
     </div>
   );
 }
@@ -148,7 +182,7 @@ function Summary({ held, published }: { held: Position[]; published: MakerCurve[
   );
 }
 
-function Positions({ held, account, onDone }: { held: Position[]; account: string; onDone: () => void }) {
+function Positions({ held, account, events, onDone }: { held: Position[]; account: string; events: EventIndex; onDone: () => void }) {
   const [filter, setFilter] = useState<PositionState | 'all'>('all');
   const [busy, setBusy] = useState<string | undefined>();
   const [tx, setTx] = useState<TxState>({ phase: 'idle' });
@@ -205,6 +239,7 @@ function Positions({ held, account, onDone }: { held: Position[]; account: strin
                       <tr key={position.market}>
                         <td>
                           <a href={`#/markets/${position.market}`}>{position.question}</a>
+                          <EventLabel context={events.get(position.market.toLowerCase())} />
                           <div className="small muted">{position.status === 'OPEN' ? timeLeft(position.closeAt) : dateTime(position.closeAt)}</div>
                         </td>
                         <td className="small">{shares(position.yes)}</td>
@@ -240,7 +275,7 @@ function Positions({ held, account, onDone }: { held: Position[]; account: strin
   );
 }
 
-function Orders({ published, account, onDone }: { published: MakerCurve[]; account: string; onDone: () => void }) {
+function Orders({ published, account, events, onDone }: { published: MakerCurve[]; account: string; events: EventIndex; onDone: () => void }) {
   const [filter, setFilter] = useState<OrderState | 'all'>('open');
   const { cancel, busy, tx, error } = useCancelCurve(account, onDone);
   const counts = tally(published, orderState);
@@ -278,6 +313,7 @@ function Orders({ published, account, onDone }: { published: MakerCurve[]; accou
                       <tr key={curve.orderHash}>
                         <td>
                           <a href={`#/markets/${curve.market}`}>{curve.question}</a>
+                          <EventLabel context={events.get(curve.market.toLowerCase())} />
                           <div className="small muted">{curve.marketStatus === 'OPEN' ? timeLeft(curve.closeAt) : curve.marketStatus.toLowerCase()}</div>
                         </td>
                         <td><span className={`badge ${curve.direction === 'BUY' ? 'resolved' : 'no'}`}>{curve.direction} {curve.side}</span></td>
@@ -309,6 +345,81 @@ function Orders({ published, account, onDone }: { published: MakerCurve[]; accou
             </p>
           </Card>}
     </div>
+  );
+}
+
+/**
+ * Every market request this account has made. A request whose access token is still in this
+ * browser can be picked up again — that token is the only way to move it along, and the server
+ * keeps a hash of it, so a request opened in another browser is history here rather than work.
+ */
+function Requests({ state }: { state: Async<CreationSummary[]> }) {
+  if (state.loading) return <Loading rows={4} label="Loading market requests" />;
+  if (state.error) return <ErrorBox error={state.error} retry={state.reload} />;
+  const requests = state.data ?? [];
+  if (requests.length === 0) {
+    return (
+      <Empty title="No market requests yet">
+        <p className="small">Create a single market, a group of markets, or import an event definition.</p>
+        <a className="button" href="#/create">Create a market</a>
+      </Empty>
+    );
+  }
+  return (
+    <Card>
+      <div className="scroll">
+        <table>
+          <thead><tr><th>Request</th><th>Kind</th><th>Status</th><th>Price</th><th /></tr></thead>
+          <tbody>
+            {requests.map(request => {
+              const token = creationToken(request.id);
+              const group = request.kind === 'GROUP';
+              return (
+                <tr key={request.id}>
+                  <td>
+                    <strong>{request.event?.title ?? request.question}</strong>
+                    {request.event && (
+                      <div className="small muted">
+                        {request.event.sourceProvider === 'horizon' ? 'Event created on Horizon' : `Imported from ${request.event.sourceProvider}`}
+                        {request.event.exclusivity === 'EXCLUSIVE' && ' · exactly one winner'}
+                        {request.childrenCreated > 0 && <> · <a href={`#/events/${request.event.slug}`}>view event</a></>}
+                      </div>
+                    )}
+                    <div className="small muted">{dateTime(request.createdAt)}</div>
+                  </td>
+                  <td className="small">
+                    {group ? <>{request.children} market{request.children === 1 ? '' : 's'}<div className="muted">{request.childrenCreated} created</div></> : 'One market'}
+                  </td>
+                  <td>
+                    <Badge kind={CREATION_BADGE[request.status] ?? 'closed'}>{CREATION_LABEL[request.status] ?? request.status}</Badge>
+                    {request.failureCode && <div className="small muted">{describe(request.failureCode)}</div>}
+                  </td>
+                  <td className="small">
+                    {request.paymentStatus
+                      ? <>{formatUnits(request.priceUnits, 8)} {request.asset === '0.0.0' ? 'HBAR' : request.asset ?? ''}
+                          <div className="muted">{request.paymentStatus.toLowerCase()}</div></>
+                      : <span className="muted">not priced yet</span>}
+                  </td>
+                  <td>
+                    {request.marketAddress
+                      ? <a className="button" href={`#/markets/${request.marketAddress}`}>Open market</a>
+                      : !isFinished(request.status) && token
+                        ? <button className="primary" onClick={() => { activateCreation({ id: request.id, token }); navigate('/create'); }}>Resume</button>
+                        : request.event && request.childrenCreated > 0
+                          ? <a className="button" href={`#/events/${request.event.slug}`}>Open event</a>
+                          : <span className="muted small">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="small muted" style={{ marginTop: 'var(--space-2)' }}>
+        A request can only be resumed from the browser that created it: its access token lives here and nowhere else,
+        and the server stores only a hash of it. A paid request that failed part way stays recoverable and is never charged twice.
+      </p>
+    </Card>
   );
 }
 

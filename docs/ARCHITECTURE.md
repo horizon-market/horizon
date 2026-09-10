@@ -115,6 +115,88 @@ per credential per UTC day, decided when payment requirements are issued, and is
 from a client-side claim. When access is not `granted` the verifier reports an explicit
 unavailable state and the standard price applies.
 
+## Events: grouped markets and imported definitions
+
+An **event** is a durable Horizon-owned grouping of independent binary markets. Every child keeps
+its own market contract, its own collateral escrow, its own outcome tokens, its own trading and its
+own resolution; the event adds a title, shared context, ordered outcome labels, and — for an import
+— the record of where the definitions came from. A market that belongs to no event is standalone
+and behaves exactly as it always has, including its URL.
+
+**Membership alone says nothing about outcomes.** Two kinds of grouping are distinguished:
+
+- `COLLECTION` — grouped for context. Nothing requires one of them to win, and the prices across
+  them are not a distribution.
+- `EXCLUSIVE` — the source or the author states that the rules pick exactly one winner.
+
+Even for an `EXCLUSIVE` event the guarantee is **backend-only**. The resolution workflow refuses a
+second `YES` while a sibling is already resolved `YES` on chain or has a `YES` resolution queued.
+The market contracts hold no notion of a group and do not enforce it, so a resolver key used
+outside this workflow could still produce two `YES` results. `NO` and `INVALID` are never blocked:
+a cancelled or void underlying event has to be settleable across the whole group. This limitation
+is stated in `/api/config`, on the event page, on the market page and on the operator screen.
+
+Shared collateral and negative-risk token conversion between siblings are **not implemented**.
+
+### Where events live
+
+Events are service metadata, in the same tier as creation drafts and payment intents — not a
+projection of chain state. `MarketEvent` holds the event, `EventMarket` its ordered children and
+their outcome labels, and a child gains a `marketAddress` only once its market is actually deployed.
+`EventMarket.marketAddress` is unique across every event, so a market belongs to at most one event
+and browsing can never draw the same market twice. An imported definition is never stored as if it
+were an indexed, deployed market.
+
+### Importing definitions
+
+Importing copies **definitions only** — the question, the outcome labels and their order, the
+resolution criteria, the evidence source and the dates. Polymarket prices, liquidity, volume,
+order books and settlement state are read only so they can be recognised and discarded; they never
+become Horizon data, and they are excluded from the stored source snapshot.
+
+- **The address is parsed, not fetched.** Only the page shapes Polymarket actually serves are
+  accepted: `polymarket.com/event/<event>`, `.../event/<event>/<market>`, `.../market/<market>`
+  and `.../sports/<league>/<event>` — the last being how sports events are addressed, with the
+  event slug in the final segment. A league on its own (`/sports/epl`) is a listing page and is
+  refused, as is any other section prefix. The slug is validated, and the backend builds its own
+  request path against the fixed `POLYMARKET_API_ORIGIN`. No user-supplied URL is ever fetched.
+- **Preview first.** `POST /api/creation/imports/preview` reports exactly what would be created and
+  why anything is refused. It writes no row, charges nothing and deploys nothing.
+- **Refusals are explicit.** Closed, archived or inactive markets; outcome sets that are not
+  YES/NO, with the actual outcomes named; placeholder outcomes the source has not filled in
+  (`Team H`, `Other`, `TBD`); missing resolution criteria; and close times outside Horizon's
+  bounds, with the bound named. A blocking reason removes that child rather than repairing it.
+- **Trading close is distinguished from event start and settlement.** Horizon's close time is when
+  trading stops; the source's end date is when it settles the question. Where the source's start
+  time and end date disagree, Horizon closes at the earlier of the two and marks the mapping as
+  needing review.
+- **Rules are preserved and changes are stated.** The source criteria are kept verbatim in the
+  snapshot and used as the standard; Horizon's settlement terms are *appended*, never substituted,
+  and every change — the addition, any shortening, a derived evidence source, a date decision — is
+  listed against that child in the review.
+- **Settlement is not delegated.** An imported market is resolved by the disclosed Horizon
+  resolver, not by Polymarket or UMA.
+- **Duplicates are detected.** `(sourceProvider, sourceEventId)` is unique, so re-importing a page
+  answers with links to the Horizon markets that already exist instead of a second bill.
+
+### Groups, pricing and partial failure
+
+- One creation request can carry several children. Pricing is the existing per-market policy: the
+  standard price per market created, and the verified-human discount applied once to the request
+  total rather than once per child. The group price is shown explicitly before approval.
+- Approval binds to a hash of the **whole plan** — event metadata, the selected children's exact
+  drafts, their labels and order, the provenance, and the price shown. Changing the selection
+  changes both the outcome set and the price, so it invalidates any earlier approval, and it is
+  refused outright after approval.
+- A selection narrower than the source's full outcome set is never labelled exhaustive.
+- Each child derives its on-chain creation id from the request id **and its position**. A
+  standalone request keeps the original derivation byte for byte, so markets created before events
+  existed are still found rather than deployed a second time.
+- Deployment walks the selected children in order and attempts every one. A retry skips anything
+  already `CREATED` and re-checks the registry before broadcasting, so a partial failure never
+  recreates a market. The payment settles once, for the request; nothing on the retry path can
+  charge again.
+
 ## Administration
 
 The operator screen inspects creation requests, payment intents, published curves (including

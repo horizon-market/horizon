@@ -1,0 +1,126 @@
+{
+  "id": "659671",
+  "ticker": "uefa-champions-league-2027-champion-20260701202025549",
+  "slug": "uefa-champions-league-2027-champion-20260701202025549",
+  "title": "UEFA Champions League: 2027 Champion",
+  "description": "This market will resolve according to the team that wins the 2026-27 UEFA Champions League Championship.\n\nIf at any point it becomes impossible for a listed team to win the 2026-27 UEFA Champions League Championship per the rules of UEFA Champions League (e.g., they are eliminated in the playoffs), the corresponding market will resolve to \"No\".\n\nIf the 2026-27 UEFA Champions League season is cancelled, postponed after June 19, 2027, 11:59 PM ET or there is otherwise no winner declared within that timeframe, this market will resolve to \"Other\".\n\nThe primary resolution source will be official information from UEFA Champions League; however, a consensus of credible reporting may also be used.",
+  "resolutionSource": "",
+  "startDate": "2026-07-02T19:03:02.322624Z",
+  "creationDate": "2026-07-02T19:07:52.191879Z",
+  "endDate": "2027-05-30T23:59:00Z",
+  "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league-2025-26-which-teams-qualify-StbSIjaEx2St.png",
+  "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/uefa-champions-league-2025-26-which-teams-qualify-StbSIjaEx2St.png",
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "restricted": true,
+  "negRisk": true,
+  "enableNegRisk": true,
+  "negRiskMarketID": "0xfb5399f0e1c4ea4d78a40957d48838ab5769fcec80592b8ce2ffd6e27a3cad00",
+  "showAllOutcomes": true,
+  "tags": [
+    {
+      "id": "100977",
+      "label": "UCL",
+      "slug": "ucl"
+    },
+    {
+      "id": "100350",
+      "label": "Soccer",
+      "slug": "soccer"
+    },
+    {
+      "id": "1",
+      "label": "Sports",
+      "slug": "sports"
+    },
+    {
+      "id": "1234",
+      "label": "Champions League",
+      "slug": "champions-league"
+    },
+    {
+      "id": "106197",
+      "label": "UCL Matchday",
+      "slug": "ucl-matchday"
+    }
+  ],
+  "markets": [
+    {
+      "id": "2772176",
+      "question": "Will Barcelona win the 2026-27 UEFA Champions League Championship?",
+      "conditionId": "0xa23467e95abf6544819a9dcb90b7719846aacf300b991ea07204e1f1649097cb",
+      "slug": "will-barcelona-win-the-2026-27-uefa-champions-league-championship-20260701202025560",
+      "resolutionSource": "",
+      "description": "This market will resolve according to the team that wins the 2026-27 UEFA Champions League Championship.\n\nIf at any point it becomes impossible for a listed team to win the 2026-27 UEFA Champions League Championship per the rules of UEFA Champions League (e.g., they are eliminated in the playoffs), the corresponding market will resolve to \"No\".\n\nIf the 2026-27 UEFA Champions League season is cancelled, postponed after June 19, 2027, 11:59 PM ET or there is otherwise no winner declared within that timeframe, this market will resolve to \"Other\".\n\nThe primary resolution source will be official information from UEFA Champions League; however, a consensus of credible reporting may also be used.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "startDate": "2026-07-02T19:04:04.806374Z",
+      "endDate": "2027-05-30T23:59:00Z",
+      "endDateIso": "2027-05-30",
+      "groupItemTitle": "Barcelona",
+      "active": true,
+      "closed": false,
+      "archived": false,
+      "resolvedBy": "0x69c47De9D4D3Dad79590d61b9e05918E03775f24",
+      "umaResolutionStatuses": "[]",
+      "negRisk": true
+    },
+    {
+      "id": "2772177",
+      "question": "Will Real Madrid win the 2026-27 UEFA Champions League Championship?",
+      "conditionId": "0x3f67a0bbef53b112984c3fe112b98ade275b2f7aa7e3c44e7bc61ff0ed55d899",
+      "slug": "will-real-madrid-win-the-2026-27-uefa-champions-league-championship-20260701202025561",
+      "resolutionSource": "",
+      "description": "This market will resolve according to the team that wins the 2026-27 UEFA Champions League Championship.\n\nIf at any point it becomes impossible for a listed team to win the 2026-27 UEFA Champions League Championship per the rules of UEFA Champions League (e.g., they are eliminated in the playoffs), the corresponding market will resolve to \"No\".\n\nIf the 2026-27 UEFA Champions League season is cancelled, postponed after June 19, 2027, 11:59 PM ET or there is otherwise no winner declared within that timeframe, this market will resolve to \"Other\".\n\nThe primary resolution source will be official information from UEFA Champions League; however, a consensus of credible reporting may also be used.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "startDate": "2026-07-02T19:04:17.581769Z",
+      "endDate": "2027-05-30T23:59:00Z",
+      "endDateIso": "2027-05-30",
+      "groupItemTitle": "Real Madrid",
+      "active": true,
+      "closed": false,
+      "archived": false,
+      "resolvedBy": "0x69c47De9D4D3Dad79590d61b9e05918E03775f24",
+      "umaResolutionStatuses": "[]",
+      "negRisk": true
+    },
+    {
+      "id": "2772202",
+      "question": "Will another team win the 2026-27 UEFA Champions League Championship?",
+      "conditionId": "0x3d23c7bc636b9c6307609f3250bf0eb26e378a54f0b0437b7aca5a05e550c2c2",
+      "slug": "will-another-team-win-the-2026-27-uefa-champions-league-championship-20260701202025586",
+      "resolutionSource": "",
+      "description": "This market will resolve according to the team that wins the 2026-27 UEFA Champions League Championship.\n\nIf at any point it becomes impossible for a listed team to win the 2026-27 UEFA Champions League Championship per the rules of UEFA Champions League (e.g., they are eliminated in the playoffs), the corresponding market will resolve to \"No\".\n\nIf the 2026-27 UEFA Champions League season is cancelled, postponed after June 19, 2027, 11:59 PM ET or there is otherwise no winner declared within that timeframe, this market will resolve to \"Other\".\n\nThe primary resolution source will be official information from UEFA Champions League; however, a consensus of credible reporting may also be used.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "startDate": "2026-07-02T19:06:08.511285Z",
+      "endDate": "2027-05-30T23:59:00Z",
+      "endDateIso": "2027-05-30",
+      "groupItemTitle": "Other",
+      "active": false,
+      "closed": false,
+      "archived": false,
+      "resolvedBy": "0x69c47De9D4D3Dad79590d61b9e05918E03775f24",
+      "umaResolutionStatuses": "[]",
+      "negRisk": true
+    },
+    {
+      "id": "2772203",
+      "question": "Will Team H win the 2026-27 UEFA Champions League Championship?",
+      "conditionId": "0x580b095be7e414b208cb8d71644ccdc3b39522648065adabf09cc832fd56fcbb",
+      "slug": "will-team-h-win-the-2026-27-uefa-champions-league-championship-20260701212302026",
+      "resolutionSource": "",
+      "description": "This market will resolve according to the team that wins the 2026-27 UEFA Champions League Championship.\n\nIf at any point it becomes impossible for a listed team to win the 2026-27 UEFA Champions League Championship per the rules of UEFA Champions League (e.g., they are eliminated in the playoffs), the corresponding market will resolve to \"No\".\n\nIf the 2026-27 UEFA Champions League season is cancelled, postponed after June 19, 2027, 11:59 PM ET or there is otherwise no winner declared within that timeframe, this market will resolve to \"Other\".\n\nThe primary resolution source will be official information from UEFA Champions League; however, a consensus of credible reporting may also be used.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "startDate": "2026-07-02T19:06:07.52913Z",
+      "endDate": "2027-05-30T23:59:00Z",
+      "endDateIso": "2027-05-30",
+      "groupItemTitle": "Team H",
+      "active": false,
+      "closed": false,
+      "archived": false,
+      "resolvedBy": "0x69c47De9D4D3Dad79590d61b9e05918E03775f24",
+      "umaResolutionStatuses": "[]",
+      "negRisk": true
+    }
+  ]
+}

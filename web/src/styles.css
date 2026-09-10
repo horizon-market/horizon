@@ -684,6 +684,51 @@ button.primary .count, .seg button.active .count { background: var(--on-accent);
 .shape-pick .alpha { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--muted); }
 .shape-pick button.active .alpha { color: var(--on-accent); }
 
+/* Events ------------------------------------------------------------------
+   An event card carries one row per outcome, and an event page puts a trade
+   ticket under each row. The rows are deliberately plain: these are separate
+   markets, so nothing here should read as a single distribution across them. */
+.event-card .event-outcomes { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: grid; gap: 2px; }
+.event-card .event-outcomes li {
+  display: grid; grid-template-columns: 1fr auto auto; gap: var(--space-2); align-items: baseline;
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.event-outcome-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.event-outcome-price { font-family: var(--font-mono); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+
+.event-head { display: flex; gap: var(--space-3); align-items: flex-start; margin-top: var(--space-2); }
+.event-art {
+  width: 56px; height: 56px; flex: none; border-radius: var(--radius-md);
+  object-fit: cover; border: 1px solid var(--border); background: var(--surface-2);
+}
+.event-row { display: grid; gap: var(--space-2); grid-template-columns: 1fr; align-items: start; }
+.event-row-name a { color: inherit; }
+.event-row-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.event-row-prices { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+/* The price tiles double as the trade control here, so they take button styling without
+   inheriting the button's centred single-line layout. */
+.event-row-prices .price-tile {
+  display: block; text-align: left; width: 100%; cursor: pointer; font: inherit;
+  background: var(--surface-2); transition: border-color var(--duration-fast) var(--ease-out);
+}
+.event-row-prices .price-tile .label { display: block; }
+.event-row-prices .price-tile .value { display: block; }
+.event-row-prices .price-tile:hover:not(:disabled) { border-color: var(--border-strong); }
+.event-row-prices .price-tile.active.yes { border-color: var(--yes); }
+.event-row-prices .price-tile.active.no { border-color: var(--no); }
+.event-row-prices .price-tile:disabled { opacity: .55; cursor: default; }
+.event-row-ticket { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+
+/* A child that cannot be created is dimmed rather than hidden: the reason is the point. */
+.own-order.unsupported { opacity: .72; border-style: dashed; }
+.own-order label.row { cursor: pointer; }
+.own-order input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
+
+@media (min-width: 700px) {
+  .event-row { grid-template-columns: minmax(0, 1.6fr) auto minmax(16rem, 1fr); align-items: center; }
+  .event-row-meta { flex-direction: column; align-items: flex-end; gap: var(--space-1); }
+}
+
 /* Design-system review page --------------------------------------------- */
 .ds-section { border-top: 1px solid var(--border); padding-top: var(--space-5); margin-top: var(--space-6); }
 .ds-section:first-of-type { border-top: none; margin-top: 0; }

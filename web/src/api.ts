@@ -17,9 +17,14 @@ export type AppConfig = {
   chainId: number; fees: Fees;
   trading: { registry: string; router: string; executor: string; aqua: string; usdc: string; decimals: number; maxRouteFills: number } | null;
   creation: { available: boolean; priceUnits: string; discountBps: number; asset: string; assetId: string; assetDecimals: number; network: string; settlementMode: 'live' | 'simulated'; facilitator: string; walletConnectProjectId: string | null; note: string };
+  events: {
+    available: boolean; sharedCollateral: boolean; negativeRiskConversion: boolean;
+    imports: { available: boolean; providers: string[]; maxChildren: number; policy: string; note: string };
+  };
   ai: { provider: string; mode: 'live' | 'development' };
   world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'sandbox' | 'staging' | 'production' };
-  resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string };
+  resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string;
+    groupConsistency: 'backend_only'; groupConsistencyNote: string };
 };
 export type SideLiquidity = { ask: number | null; bid: number | null; availableShares: string };
 /**
@@ -39,7 +44,42 @@ export type Market = {
 export type BookLevel = { price: number; shares: string; orders: number; source: 'direct' | 'complementary' | 'mixed'; executable: boolean };
 export type OutcomeBook = { asks: BookLevel[]; bids: BookLevel[]; spread: number | null };
 export type MarketBook = { yes: OutcomeBook; no: OutcomeBook };
-export type MarketList = { indexedBlock: number; indexedHash: string; fees: Fees; markets: Market[] };
+/**
+ * An event groups independent binary markets. Membership alone says nothing about their outcomes:
+ * only `exclusivity: 'EXCLUSIVE'` means the rules pick exactly one winner, and even then the rule
+ * is checked by Horizon's resolution workflow, not by the market contracts.
+ */
+export type EventChild = {
+  position: number; outcomeLabel: string; question: string;
+  marketAddress: string | null;
+  /** Horizon market state, present once the child is deployed and indexed. */
+  market: Market | null;
+  source: { slug: string | null; url: string | null } | null;
+};
+export type HorizonEvent = {
+  id: string; slug: string; title: string; description: string; category: string; tags: string[];
+  imageUrl: string | null; iconUrl: string | null;
+  exclusivity: 'COLLECTION' | 'EXCLUSIVE'; exclusivityNote: string; outcomesComplete: boolean; status: string;
+  source: { provider: string; eventId: string | null; slug: string | null; url: string | null; importedAt: string | null };
+  createdAt: string; children: EventChild[];
+  stats: { markets: number; live: number; open: number; resolved: number; curves: number; collateral: string };
+  exclusivityEnforcement: 'backend_only' | 'none';
+};
+export type EventList = { indexedBlock: number | null; marketsError?: string; fees: Fees; events: HorizonEvent[]; note: string };
+export type EventDetail = { indexedBlock: number | null; marketsError?: string; fees: Fees; event: HorizonEvent; resolution: { enforcement: string; note: string } };
+/** The group a market belongs to, carried alongside the market's own detail. */
+export type MarketEventContext = {
+  slug: string; title: string; exclusivity: 'COLLECTION' | 'EXCLUSIVE'; exclusivityNote: string;
+  outcomesComplete: boolean; exclusivityEnforcement: 'backend_only' | 'none';
+  source: { provider: string; url: string | null; importedAt: string | null };
+  outcomeLabel: string; position: number;
+  siblings: { position: number; outcomeLabel: string; marketAddress: string | null }[];
+};
+export type MarketList = {
+  indexedBlock: number; indexedHash: string; fees: Fees; markets: Market[];
+  /** Grouped markets travel with their event; `standalone` names the ones that belong to none. */
+  events: HorizonEvent[]; standalone: string[];
+};
 export type Quote = {
   chainId: number; market: string; shares: string; usdc: string; limit: string; deadline: number; fees: Fees;
   simulation: 'passed' | 'approval_required' | 'insufficient_balance';
@@ -64,13 +104,79 @@ export type MakerCurve = {
 };
 export type Position = { market: string; question: string; closeAt: number; status: string; result: string; yesToken: string; noToken: string; yes: string; no: string; redeemableUsdc: string };
 export type Redemption = { result: string; payoutUsdc: string; transaction: { to: string; data: string; value: string } };
+export type MarketDraft = { question: string; yesOutcome: string; noOutcome: string; category: string; closeAt: string; rules: string; evidenceSource: string };
+export type ImportWarning = { code: string; severity: 'blocking' | 'review' | 'info'; message: string };
+export type ImportDates = { tradingCloseAt: string | null; sourceEndDate: string | null; sourceStartDate: string | null; sourceGameStart: string | null; ambiguous: boolean };
+/** One child inside a group request, with its own deployment state. */
+export type RequestChild = {
+  position: number; outcomeLabel: string; draft: MarketDraft | null; draftHash: string;
+  status: 'PENDING' | 'SKIPPED' | 'CREATING' | 'CREATED' | 'FAILED';
+  marketAddress: string | null; creationTxHash: string | null;
+  failureCode: string | null; failureDetail: string | null; attempts: number;
+  notes: { warnings: ImportWarning[]; ruleChanges: string[] } | null;
+};
+export type RequestEvent = {
+  id: string; slug: string; title: string; description: string; category: string; tags: string[] | null;
+  exclusivity: 'COLLECTION' | 'EXCLUSIVE'; exclusivityNote: string; outcomesComplete: boolean; status: string;
+  exclusivityEnforcement: 'backend_only' | 'none';
+  source: { provider: string; eventId: string | null; slug: string | null; url: string | null; importedAt: string | null };
+  members: { position: number; outcomeLabel: string; question: string; marketAddress: string | null; sourceUrl: string | null }[];
+};
+/** The explicit group price, shown before approval and bound into the approval hash. */
+export type GroupQuote = {
+  unitUnits: string; quantity: number; totalUnits: string; discountedTotalUnits: string;
+  discountBps: number; asset: string; assetDecimals: number; network: string; note: string;
+};
+/** What the importer read from a source page, and what Horizon would create from it. */
+export type ImportPreview = {
+  title: string; description: string; category: string; tags: string[];
+  imageUrl: string; iconUrl: string;
+  exclusivity: 'COLLECTION' | 'EXCLUSIVE'; exclusivityNote: string;
+  source: { provider: string; eventId: string; slug: string; url: string; startDate: string | null; endDate: string | null;
+    startTime: string | null; closed: boolean; active: boolean; archived: boolean; negRisk: boolean; series: string[]; resolutionSource: string };
+  children: {
+    position: number; outcomeLabel: string; question: string; draft: MarketDraft | null;
+    supported: boolean; preselected: boolean; warnings: ImportWarning[]; ruleChanges: string[]; dates: ImportDates;
+    source: { provider: string; marketId: string; slug: string; url: string; conditionId: string; outcomes: string[];
+      description: string; resolutionSource: string; resolvedBy: string; umaResolutionStatuses: string[];
+      closed: boolean; active: boolean; archived: boolean; imageUrl: string };
+  }[];
+  warnings: ImportWarning[];
+};
+export type ExistingImport = {
+  eventId: string; slug: string; title: string; status: string; importedAt: string | null; sourceUrl: string | null;
+  markets: { position: number; outcomeLabel: string; question: string; marketAddress: string | null; sourceSlug: string | null }[];
+  created: number; requests: { id: string; status: string; createdAt: string }[]; inProgress: boolean;
+};
+export type ImportPreviewResult = {
+  source: { kind: 'event' | 'market'; slug: string; eventSlug?: string; url: string };
+  preview: ImportPreview; existing?: ExistingImport; quote: GroupQuote; importPolicy: string;
+};
+export type ImportRejection = { error: string; preview?: ImportPreview; existing?: ExistingImport; source?: ImportPreviewResult['source'] };
+
 export type CreationRequest = {
   id: string; status: string; question: string; requesterKind: string; requester: string;
-  draft: { question: string; yesOutcome: string; noOutcome: string; category: string; closeAt: string; rules: string; evidenceSource: string } | null;
+  draft: MarketDraft | Record<string, unknown> | null;
   draftHash: string | null; draftProvider: string | null; draftMode: string | null;
-  review: { duplicateCheck: string; groundedOnBlock: number; rationale: string; warnings: { market: string; question: string; closeAt: string; similarity: number; reason: string }[] } | null;
+  kind: 'SINGLE' | 'GROUP';
+  children: RequestChild[];
+  event: RequestEvent | null;
+  groupQuote?: GroupQuote;
+  review: {
+    duplicateCheck: string; groundedOnBlock: number; rationale: string;
+    warnings: { market: string; question: string; closeAt: string; similarity: number; reason: string }[];
+    import?: {
+      provider: string; url: string; kind: string; eventId: string; eventSlug: string; importedAt: string;
+      eventWarnings: ImportWarning[];
+      children: { position: number; outcomeLabel: string; question: string; supported: boolean; selected: boolean;
+        warnings: ImportWarning[]; ruleChanges: string[]; dates: ImportDates;
+        source: { marketId: string; slug: string; url: string; conditionId: string; outcomes: string[]; resolutionSource: string; closed: boolean } }[];
+      sourceRules: { position: number; description: string }[];
+    };
+  } | null;
   approvedAt: string | null; approvedHash: string | null; discountBps: number; discountNote: string; priceUnits: string;
-  marketAddress: string | null; creationTxHash: string | null; failureCode: string | null; attempts: number;
+  marketAddress: string | null; creationTxHash: string | null;
+  failureCode: string | null; failureDetail: string | null; attempts: number;
   createdAt: string; updatedAt: string;
   verification: { credentialType: string; verifier: string; verifiedAt: string } | null;
   payment: { status: string; network: string; asset: string; amountUnits: string; payTo: string; facilitator: string; transactionRef: string | null; payer: string | null; settledAt: string | null; failureCode: string | null; attempts: number } | null;
@@ -82,6 +188,9 @@ export type CreationSummary = {
   marketAddress: string | null; priceUnits: string; discountBps: number;
   failureCode: string | null; createdAt: string; updatedAt: string;
   paymentStatus: string | null; asset: string | null;
+  kind: 'SINGLE' | 'GROUP';
+  event: { slug: string; title: string; status: string; exclusivity: string; sourceProvider: string } | null;
+  children: number; childrenCreated: number;
 };
 export type PaymentResource = { url: string; description?: string; mimeType?: string };
 export type PaymentRequirements = { scheme: string; network: string; amount: string; payTo: string; maxTimeoutSeconds: number; asset: string; extra: { feePayer?: string; nonce: string; assetDecimals: number; settlementMode: string } };
@@ -111,8 +220,13 @@ export type AdminOverview = {
   resolutions: { id: string; market: string; result: string; status: string; evidence: string; txHash: string | null; failureCode: string | null; attempts: number; createdAt: string }[];
   jobs: { id: string; label: string; completedAt: string }[];
   awaitingResolution: AdminMarket[];
+  events: HorizonEvent[];
   marketsError?: string;
-  resolverModel: { centralized: boolean; disclosed: boolean; resolver: string | null; payouts: Record<string, string> };
+  resolverModel: {
+    centralized: boolean; disclosed: boolean; resolver: string | null; payouts: Record<string, string>;
+    /** Exclusive-group consistency is a workflow check, not an on-chain guarantee. */
+    groupConsistency: { enforcement: 'backend_only'; note: string };
+  };
 };
 
 const post = <T>(path: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -121,7 +235,9 @@ const post = <T>(path: string, body: unknown, headers: Record<string, string> = 
 export const api = {
   config: () => request<AppConfig>('/api/config'),
   markets: () => request<MarketList>('/api/markets'),
-  market: (id: string) => request<{ indexedBlock: number; market: Market; book: MarketBook }>(`/api/markets/${id}`),
+  market: (id: string) => request<{ indexedBlock: number; market: Market; book: MarketBook; event: MarketEventContext | null }>(`/api/markets/${id}`),
+  events: () => request<EventList>('/api/events'),
+  event: (slug: string) => request<EventDetail>(`/api/events/${encodeURIComponent(slug)}`),
   positions: (account: string) => request<{ indexedBlock: number; positions: Position[] }>(`/api/positions/${account}`),
   makerCurves: (account: string) => request<{ indexedBlock: number; curves: MakerCurve[] }>(`/api/curves/${account}`),
   quote: (input: { market: string; account: string; recipient: string; isYes: boolean; isBuy: boolean; shares: string; slippageBps: number }) => post<Quote>('/api/quotes', input),
@@ -130,6 +246,31 @@ export const api = {
   redeem: (input: { account: string; market: string; recipient: string; yesShares: string; noShares: string }) => post<Redemption>('/api/redemptions', input),
   createDraft: (input: { question: string; requesterKind: 'browser' | 'agent'; requester: string; category?: string; closeAt?: string }, idempotencyKey: string) =>
     post<{ request: CreationRequest; accessToken?: string; replay: boolean }>('/api/creation/requests', input, { 'idempotency-key': idempotencyKey }),
+  createGroup: (input: {
+    requesterKind: 'browser' | 'agent'; requester: string;
+    event: { title: string; description?: string; category?: string; exclusivity: 'COLLECTION' | 'EXCLUSIVE'; outcomesComplete?: boolean };
+    children: { question: string; outcomeLabel: string; closeAt?: string }[];
+  }, idempotencyKey: string) =>
+    post<{ request: CreationRequest; accessToken?: string; replay: boolean }>('/api/creation/groups', input, { 'idempotency-key': idempotencyKey }),
+  /** Reads a Polymarket page address through the backend. Nothing is written or charged. */
+  previewImport: (url: string) => post<ImportPreviewResult>('/api/creation/imports/preview', { url }),
+  /**
+   * Creates the event and its children from a source page. A refusal — the source cannot be
+   * imported, or it already was — comes back with its reasons and links attached, not bare.
+   */
+  createImport: async (input: { url: string; requesterKind: 'browser' | 'agent'; requester: string; positions?: number[] }, idempotencyKey: string) => {
+    const response = await fetch('/api/creation/imports', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify(input),
+    });
+    const body = await response.json() as ({ request: CreationRequest; accessToken?: string; replay: boolean } & ImportRejection);
+    if (response.ok) return { ok: true as const, request: body.request, accessToken: body.accessToken, replay: body.replay };
+    if (response.status === 409 || response.status === 422) {
+      return { ok: false as const, reason: body.error, preview: body.preview, existing: body.existing };
+    }
+    throw new ApiError(response.status, body.error ?? 'import_failed');
+  },
+  selectChildren: (id: string, token: string, positions: number[]) =>
+    post<{ request: CreationRequest }>(`/api/creation/requests/${id}/selection`, { positions }, { authorization: `Bearer ${token}` }),
   getRequest: (id: string, token: string) => request<{ request: CreationRequest }>(`/api/creation/requests/${id}`, { headers: { authorization: `Bearer ${token}` } }),
   myCreations: (requester: string) => request<{ requests: CreationSummary[] }>(`/api/creation/requests?requester=${encodeURIComponent(requester)}`),
   abandon: (id: string, token: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/abandonment`, {}, { authorization: `Bearer ${token}` }),

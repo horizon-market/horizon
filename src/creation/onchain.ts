@@ -7,16 +7,28 @@ import type { CreationConfig } from '../config.js';
 export class OnChainCreationError extends Error {}
 const ZERO = '0x0000000000000000000000000000000000000000';
 
-/** A stable identifier derived from the durable request id makes creation idempotent on-chain. */
-export function creationId(requestId: string): Hex {
-  return keccak256(toHex(`horizon-creation:${requestId}`));
+/**
+ * A stable identifier derived from the durable request id makes creation idempotent on-chain.
+ *
+ * A group request deploys several markets, so each child derives from the request id *and* its
+ * position. `position` is omitted for a standalone request, which keeps the derivation of every
+ * market created before events existed byte-identical — an already-deployed market is still found
+ * by its own creation id, and no retry can create a second one.
+ */
+export function creationId(requestId: string, position?: number): Hex {
+  const key = position === undefined ? `horizon-creation:${requestId}` : `horizon-creation:${requestId}:${position}`;
+  return keccak256(toHex(key));
 }
 
-export type MarketPlan = { requestId: string; question: string; rules: string; evidenceSource: string; closeAt: number };
+export type MarketPlan = {
+  requestId: string; question: string; rules: string; evidenceSource: string; closeAt: number;
+  /** Set for a child of an event; omitted for a standalone market. */
+  position?: number;
+};
 
 export interface MarketDeployer {
   readonly resolver: Address;
-  find(requestId: string): Promise<Address | undefined>;
+  find(requestId: string, position?: number): Promise<Address | undefined>;
   create(plan: MarketPlan): Promise<{ market: Address; transactionHash?: Hex; alreadyExisted: boolean }>;
 }
 
@@ -32,12 +44,12 @@ export class RegistryMarketDeployer implements MarketDeployer {
     this.resolver = config.resolver;
     this.client = createPublicClient({ chain: sepolia, transport: http(config.rpc, { timeout: 20_000, retryCount: 1 }) });
   }
-  async find(requestId: string): Promise<Address | undefined> {
-    const market = await this.client.readContract({ address: this.config.registry, abi: registryAbi, functionName: 'marketByCreationId', args: [creationId(requestId)] }) as Address;
+  async find(requestId: string, position?: number): Promise<Address | undefined> {
+    const market = await this.client.readContract({ address: this.config.registry, abi: registryAbi, functionName: 'marketByCreationId', args: [creationId(requestId, position)] }) as Address;
     return market === ZERO ? undefined : market;
   }
   async create(plan: MarketPlan) {
-    const existing = await this.find(plan.requestId);
+    const existing = await this.find(plan.requestId, plan.position);
     if (existing) return { market: existing, alreadyExisted: true };
     if (!this.config.privateKey) throw new OnChainCreationError('creation_key_not_configured');
     const now = Math.floor(Date.now() / 1000);
@@ -45,12 +57,12 @@ export class RegistryMarketDeployer implements MarketDeployer {
     if (await this.client.getChainId() !== 11155111) throw new OnChainCreationError('wrong_chain');
     const account = privateKeyToAccount(this.config.privateKey);
     const wallet = createWalletClient({ account, chain: sepolia, transport: http(this.config.rpc, { retryCount: 0 }) });
-    const args = [creationId(plan.requestId), plan.question, plan.rules, plan.evidenceSource, plan.closeAt, this.resolver] as const;
+    const args = [creationId(plan.requestId, plan.position), plan.question, plan.rules, plan.evidenceSource, plan.closeAt, this.resolver] as const;
     await this.client.simulateContract({ address: this.config.registry, abi: registryAbi, functionName: 'createMarket', args, account });
     const hash = await wallet.writeContract({ address: this.config.registry, abi: registryAbi, functionName: 'createMarket', args });
     const receipt = await this.client.waitForTransactionReceipt({ hash, confirmations: 1, timeout: 180_000 });
     if (receipt.status !== 'success') throw new OnChainCreationError('creation_transaction_reverted');
-    const market = await this.find(plan.requestId);
+    const market = await this.find(plan.requestId, plan.position);
     if (!market) throw new OnChainCreationError('creation_not_recorded');
     return { market, transactionHash: receipt.transactionHash, alreadyExisted: false };
   }

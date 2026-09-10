@@ -1,15 +1,19 @@
 import { lazy, Suspense, useState } from 'react';
 import type { RpContext } from '@worldcoin/idkit';
-import { api, ApiError, type CreationRequest, type PaymentRequirements, type PaymentResource } from '../api';
+import {
+  api, ApiError,
+  type CreationRequest, type ExistingImport, type ImportPreviewResult, type ImportWarning,
+  type MarketDraft, type PaymentRequirements, type PaymentResource, type RequestChild,
+} from '../api';
 import { useLocalState } from '../hooks';
 import { CREATION_LABEL, forgetCreation, isDiscardable, rememberCreation, type Saved } from '../creations';
 import { useConfig, useWallet } from '../App';
-import { Card, Notice, TxLink, describe } from '../components/Ui';
+import { Address, Badge, Card, Notice, TxLink, describe } from '../components/Ui';
 import { dateTime, formatUnits } from '../format';
 
 const WorldVerification = lazy(() => import('../components/WorldVerification').then(module => ({ default: module.WorldVerification })));
 
-const STEPS = ['Describe', 'Review draft', 'Verify (optional)', 'Pay', 'Market'] as const;
+const STEPS = ['Describe', 'Review', 'Verify (optional)', 'Pay', 'Markets'] as const;
 
 const stepFor = (request: CreationRequest | undefined) => {
   if (!request) return 0;
@@ -18,6 +22,13 @@ const stepFor = (request: CreationRequest | undefined) => {
   if (['PAYMENT_REQUIRED', 'PAYMENT_REVIEW'].includes(request.status)) return 3;
   return 4;
 };
+
+/** A standalone request stores one MarketDraft; a group stores its event metadata instead. */
+const asDraft = (request: CreationRequest): MarketDraft | null =>
+  request.kind === 'GROUP' || !request.draft ? null : request.draft as MarketDraft;
+
+type Act = <T,>(run: () => Promise<T>) => Promise<T | undefined>;
+type Mode = 'single' | 'group' | 'import';
 
 export function CreateMarket() {
   const config = useConfig();
@@ -39,24 +50,35 @@ export function CreateMarket() {
     );
   }
 
-  const act = async <T,>(run: () => Promise<T>): Promise<T | undefined> => {
+  const act: Act = async run => {
     setError(undefined); setBusy(true);
     try { return await run(); }
     catch (issue) { setError(issue instanceof ApiError ? describe(issue.code) : issue instanceof Error ? issue.message : 'The request failed.'); return undefined; }
     finally { setBusy(false); }
   };
 
+  const start = (result: { request: CreationRequest; accessToken?: string }) => {
+    if (!result.accessToken) {
+      setError('That request already exists but its access token is not available in this browser.');
+      return;
+    }
+    const key = { id: result.request.id, token: result.accessToken };
+    rememberCreation(key); setSaved(key); setRequest(result.request);
+  };
+
   const step = stepFor(request);
+  const group = request?.kind === 'GROUP';
   return (
     <div className="stack">
-      <h1>Create a market</h1>
+      <h1>{group ? 'Create an event' : 'Create a market'}</h1>
       <div className="steps">
         {STEPS.map((label, index) => <span key={label} className={index < step ? 'done' : index === step ? 'active' : ''}>{index + 1}. {label}</span>)}
       </div>
       <Notice kind="info">
         Market creation is a paid service on Hedera through x402. It is <strong>separate from trading, which has no fee at all</strong>.
-        Standard price {formatUnits(config.creation.priceUnits, config.creation.assetDecimals)} {config.creation.asset}
-        {config.creation.discountBps > 0 && <> · verified humans pay {formatUnits((BigInt(config.creation.priceUnits) * BigInt(10_000 - config.creation.discountBps) / 10_000n).toString(), config.creation.assetDecimals)} {config.creation.asset}</>}.
+        Standard price {formatUnits(config.creation.priceUnits, config.creation.assetDecimals)} {config.creation.asset} per market
+        {config.creation.discountBps > 0 && <> · verified humans pay {formatUnits((BigInt(config.creation.priceUnits) * BigInt(10_000 - config.creation.discountBps) / 10_000n).toString(), config.creation.assetDecimals)} {config.creation.asset} per market</>}.
+        {' '}An event is charged per market it creates.
       </Notice>
       {config.creation.settlementMode === 'simulated' && (
         <Notice kind="warn">
@@ -65,22 +87,16 @@ export function CreateMarket() {
         </Notice>
       )}
       {error && <Notice kind="error">{error}</Notice>}
-      {!request && <Describe busy={busy} account={wallet.account} onCreate={async input => {
-        const result = await act(() => api.createDraft(input, crypto.randomUUID()));
-        if (result?.accessToken) {
-          const key = { id: result.request.id, token: result.accessToken };
-          rememberCreation(key); setSaved(key); setRequest(result.request);
-        }
-        else if (result) setError('That draft already exists but its access token is not available in this browser.');
-      }} />}
+      {!request && <Start busy={busy} account={wallet.account} act={act} onStarted={start} />}
       {request && saved && (
         <div className="stack">
-          <Review request={request} />
+          {group ? <GroupReview request={request} saved={saved} busy={busy} act={act} onChange={setRequest} /> : <Review request={request} />}
           {request.status === 'DRAFT' && (
-            <Card title="Approve the exact draft">
+            <Card title={group ? 'Approve this event and its markets' : 'Approve the exact draft'}>
               <p className="small muted">
-                Nothing is charged and no market is created until you approve this exact text. Approval is bound to the draft's hash,
-                so a changed draft must be reviewed again.
+                Nothing is charged and no market is created until you approve this exact text. Approval is bound to a hash of
+                {group ? ' the event, the markets you selected, their order and the price shown above' : " the draft"},
+                so any change has to be reviewed again.
               </p>
               <button className="primary" disabled={busy} onClick={async () => {
                 const result = await act(() => api.approve(saved.id, saved.token, request.draftHash!));
@@ -110,35 +126,45 @@ export function CreateMarket() {
   );
 }
 
-/**
- * The way out of a request the requester no longer wants. Before any money moves it is discarded
- * outright, on the server as well as here, so the request cannot be resumed by accident and the
- * payment intent behind it is cancelled. Once a payment has settled or is settling there is nothing
- * to discard: the request is simply set aside, and its access token stays in this browser so the
- * portfolio can still reach it.
- */
-function StartOver({ request, busy, onDiscard, onRelease }: {
-  request: CreationRequest; busy: boolean; onDiscard: () => Promise<void>; onRelease: () => void;
+// ---------------------------------------------------------------------------
+// Choosing what to create.
+// ---------------------------------------------------------------------------
+
+const MODES: { key: Mode; label: string; hint: string }[] = [
+  { key: 'single', label: 'One market', hint: 'A single binary YES/NO question.' },
+  { key: 'group', label: 'A group of markets', hint: 'One event containing several binary markets.' },
+  { key: 'import', label: 'Import from Polymarket', hint: 'Read an event or market page and review what it would create.' },
+];
+
+function Start({ busy, account, act, onStarted }: {
+  busy: boolean; account?: string; act: Act; onStarted: (result: { request: CreationRequest; accessToken?: string }) => void;
 }) {
-  const discardable = isDiscardable(request.status, request.payment?.status);
-  if (request.status === 'CREATED') return null;
+  const config = useConfig();
+  const importable = config.events.imports.available;
+  const [mode, setMode] = useState<Mode>('single');
+  const available = MODES.filter(entry => entry.key !== 'import' || importable);
   return (
-    <Card title="Start a different market">
-      <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
-        {discardable
-          ? `This request is at “${CREATION_LABEL[request.status] ?? request.status}” and nothing has been charged for it.
-             Discarding it cancels its payment request and frees you to draft another.`
-          : `A payment for this request has settled or is settling, so it cannot be discarded. Setting it aside starts a
-             fresh request; this one keeps its place in your portfolio, where you can pick it up again.`}
-      </p>
-      {discardable
-        ? <button disabled={busy} onClick={() => void onDiscard()}>{busy ? 'Discarding…' : 'Discard this request'}</button>
-        : <button disabled={busy} onClick={onRelease}>Set aside and start another</button>}
-    </Card>
+    <div className="stack">
+      <Card title="What are you creating?">
+        <div className="seg" role="radiogroup" aria-label="Creation mode">
+          {available.map(entry => (
+            <button key={entry.key} role="radio" aria-checked={mode === entry.key}
+              className={mode === entry.key ? 'active' : ''} onClick={() => setMode(entry.key)}>{entry.label}</button>
+          ))}
+        </div>
+        <p className="small muted" style={{ margin: 0 }}>{available.find(entry => entry.key === mode)?.hint}</p>
+        {!importable && <p className="small muted" style={{ marginBottom: 0 }}>Importing is not enabled on this deployment.</p>}
+      </Card>
+      {mode === 'single' && <Describe busy={busy} account={account} act={act} onStarted={onStarted} />}
+      {mode === 'group' && <DescribeGroup busy={busy} account={account} act={act} onStarted={onStarted} />}
+      {mode === 'import' && <ImportFlow busy={busy} account={account} act={act} onStarted={onStarted} />}
+    </div>
   );
 }
 
-function Describe({ busy, account, onCreate }: { busy: boolean; account?: string; onCreate: (input: { question: string; requesterKind: 'browser' | 'agent'; requester: string; category?: string; closeAt?: string }) => Promise<void> }) {
+function Describe({ busy, account, act, onStarted }: {
+  busy: boolean; account?: string; act: Act; onStarted: (result: { request: CreationRequest; accessToken?: string }) => void;
+}) {
   const config = useConfig();
   const [question, setQuestion] = useState('');
   const [category, setCategory] = useState('');
@@ -169,16 +195,356 @@ function Describe({ busy, account, onCreate }: { busy: boolean; account?: string
           <div className="hint">Trading stops at this time; the resolver acts afterwards.</div>
         </div>
       </div>
-      <button className="primary" disabled={busy || tooShort} onClick={() => void onCreate({
+      <button className="primary" disabled={busy || tooShort} onClick={() => void act(() => api.createDraft({
         question: question.trim(), requesterKind: 'browser', requester: account ?? 'browser',
         category: category.trim() || undefined, closeAt: closeAt ? new Date(closeAt).toISOString() : undefined,
-      })}>{busy ? 'Drafting…' : 'Draft this market'}</button>
+      }, crypto.randomUUID())).then(result => result && onStarted(result))}>{busy ? 'Drafting…' : 'Draft this market'}</button>
     </Card>
   );
 }
 
+type ChildInput = { question: string; outcomeLabel: string };
+const emptyChild = (): ChildInput => ({ question: '', outcomeLabel: '' });
+
+/**
+ * A manually authored group. Each row becomes its own binary market with its own contracts and
+ * collateral; the event is the shared context around them, and the exclusivity choice is what
+ * decides whether being in it says anything about the outcomes at all.
+ */
+function DescribeGroup({ busy, account, act, onStarted }: {
+  busy: boolean; account?: string; act: Act; onStarted: (result: { request: CreationRequest; accessToken?: string }) => void;
+}) {
+  const config = useConfig();
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
+  const [exclusivity, setExclusivity] = useState<'COLLECTION' | 'EXCLUSIVE'>('COLLECTION');
+  const [complete, setComplete] = useState(false);
+  const [children, setChildren] = useState<ChildInput[]>([emptyChild(), emptyChild()]);
+  const limit = config.events.imports.maxChildren;
+
+  const usable = children.filter(child => child.question.trim().length >= 15 && child.outcomeLabel.trim().length > 0);
+  const ready = title.trim().length >= 3 && usable.length >= 1;
+  const total = BigInt(config.creation.priceUnits) * BigInt(Math.max(1, usable.length));
+
+  const update = (index: number, patch: Partial<ChildInput>) =>
+    setChildren(current => current.map((child, position) => position === index ? { ...child, ...patch } : child));
+
+  return (
+    <Card title="Describe the event">
+      <p className="small muted">
+        Each market below is created and resolved on its own. Being in one event does not link their outcomes
+        unless you say the rules pick exactly one winner.
+      </p>
+      <div className="field">
+        <label htmlFor="event-title">Event title</label>
+        <input id="event-title" value={title} maxLength={200} onChange={event => setTitle(event.target.value)} placeholder="Barcelona vs Real Madrid" />
+      </div>
+      <div className="field">
+        <label htmlFor="event-description">Shared context (optional)</label>
+        <textarea id="event-description" value={description} maxLength={4000} onChange={event => setDescription(event.target.value)}
+          placeholder="What every market in this event is about." />
+      </div>
+      <div className="fields">
+        <div className="field">
+          <label htmlFor="event-category">Category (optional)</label>
+          <input id="event-category" value={category} maxLength={40} onChange={event => setCategory(event.target.value)} placeholder="Sports" />
+        </div>
+        <div className="field">
+          <label htmlFor="event-rule">Do the rules pick exactly one winner?</label>
+          <select id="event-rule" value={exclusivity} onChange={event => setExclusivity(event.target.value as 'COLLECTION' | 'EXCLUSIVE')}>
+            <option value="COLLECTION">No — grouped for context only</option>
+            <option value="EXCLUSIVE">Yes — exactly one market resolves YES</option>
+          </select>
+          <div className="hint">
+            {exclusivity === 'EXCLUSIVE'
+              ? 'Horizon refuses a second YES in this group through its resolution workflow. The market contracts do not enforce it.'
+              : 'Nothing links the outcomes; their prices need not add up to 100%.'}
+          </div>
+        </div>
+      </div>
+      {exclusivity === 'EXCLUSIVE' && (
+        <div className="field">
+          <label htmlFor="event-complete">
+            <input id="event-complete" type="checkbox" checked={complete} onChange={event => setComplete(event.target.checked)} />
+            {' '}These markets cover every possible outcome
+          </label>
+          <div className="hint">Leave this unticked unless the list is exhaustive; an incomplete list is never shown as the full set.</div>
+        </div>
+      )}
+
+      <h3 style={{ marginTop: 'var(--space-4)' }}>Markets in this event</h3>
+      {children.map((child, index) => (
+        <div key={index} className="own-order">
+          <div className="row between">
+            <span className="small muted">Market {index + 1}</span>
+            {children.length > 1 && (
+              <button className="link" onClick={() => setChildren(current => current.filter((_, position) => position !== index))}>Remove</button>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor={`child-label-${index}`}>Outcome name</label>
+            <input id={`child-label-${index}`} value={child.outcomeLabel} maxLength={80}
+              onChange={event => update(index, { outcomeLabel: event.target.value })} placeholder="Barcelona wins" />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor={`child-question-${index}`}>Binary question</label>
+            <textarea id={`child-question-${index}`} value={child.question} maxLength={200}
+              onChange={event => update(index, { question: event.target.value })} placeholder="Will Barcelona win the match on …?" />
+            {child.question.trim().length > 0 && child.question.trim().length < 15 && <div className="error">Write at least 15 characters.</div>}
+          </div>
+        </div>
+      ))}
+      <div className="row" style={{ marginTop: 'var(--space-3)' }}>
+        <button disabled={children.length >= limit} onClick={() => setChildren(current => [...current, emptyChild()])}>Add another market</button>
+        {children.length >= limit && <span className="small muted">At most {limit} markets per event.</span>}
+      </div>
+
+      <dl className="kv total" style={{ marginTop: 'var(--space-3)' }}>
+        <dt>Markets to create</dt><dd>{usable.length}</dd>
+        <dt>Creation price</dt>
+        <dd><strong>{formatUnits(total.toString(), config.creation.assetDecimals)} {config.creation.asset}</strong> — one charge per market</dd>
+      </dl>
+      <button className="primary" disabled={busy || !ready} onClick={() => void act(() => api.createGroup({
+        requesterKind: 'browser', requester: account ?? 'browser',
+        event: { title: title.trim(), description: description.trim() || undefined, category: category.trim() || undefined, exclusivity, outcomesComplete: complete },
+        children: usable.map(child => ({ question: child.question.trim(), outcomeLabel: child.outcomeLabel.trim() })),
+      }, crypto.randomUUID())).then(result => result && onStarted(result))}>
+        {busy ? 'Drafting…' : `Draft ${usable.length} market${usable.length === 1 ? '' : 's'}`}
+      </button>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Importing.
+// ---------------------------------------------------------------------------
+
+const SEVERITY: Record<ImportWarning['severity'], 'error' | 'warn' | 'info'> = { blocking: 'error', review: 'warn', info: 'info' };
+
+function Warnings({ warnings, title }: { warnings: ImportWarning[]; title?: string }) {
+  if (warnings.length === 0) return null;
+  const worst = warnings.some(warning => warning.severity === 'blocking') ? 'blocking'
+    : warnings.some(warning => warning.severity === 'review') ? 'review' : 'info';
+  return (
+    <Notice kind={SEVERITY[worst]}>
+      {title && <strong>{title}</strong>}
+      <ul style={{ margin: title ? '.4rem 0 0' : 0, paddingLeft: '1.1rem' }}>
+        {warnings.map((warning, index) => <li key={`${warning.code}-${index}`}>{warning.message}</li>)}
+      </ul>
+    </Notice>
+  );
+}
+
+function ExistingNotice({ existing }: { existing: ExistingImport }) {
+  const created = existing.markets.filter(market => market.marketAddress);
+  return (
+    <Notice kind="warn">
+      <strong>This page has already been imported into Horizon.</strong>{' '}
+      {created.length > 0
+        ? <>It became <a href={`#/events/${existing.slug}`}>{existing.title}</a>, with {created.length} market{created.length === 1 ? '' : 's'} already created.
+            Trade those instead of paying to create them again.</>
+        : <>An import of it is already in progress as “{existing.title}”. Nothing further is charged; wait for it to finish, or discard it from the browser that started it.</>}
+      {created.length > 0 && (
+        <ul style={{ margin: '.4rem 0 0', paddingLeft: '1.1rem' }}>
+          {created.map(market => (
+            <li key={market.position}><a href={`#/markets/${market.marketAddress}`}>{market.outcomeLabel}</a></li>
+          ))}
+        </ul>
+      )}
+    </Notice>
+  );
+}
+
+/** Paste an address, read a preview, choose what to import. Nothing is charged until approval. */
+function ImportFlow({ busy, account, act, onStarted }: {
+  busy: boolean; account?: string; act: Act; onStarted: (result: { request: CreationRequest; accessToken?: string }) => void;
+}) {
+  const config = useConfig();
+  const [url, setUrl] = useState('');
+  const [preview, setPreview] = useState<ImportPreviewResult | undefined>();
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [rejection, setRejection] = useState<{ reason: string; existing?: ExistingImport } | undefined>();
+
+  const fetchPreview = async () => {
+    setRejection(undefined);
+    const result = await act(() => api.previewImport(url.trim()));
+    if (!result) return;
+    setPreview(result);
+    setSelected(new Set(result.preview.children.filter(child => child.preselected).map(child => child.position)));
+  };
+
+  const blocked = preview?.preview.warnings.some(warning => warning.severity === 'blocking') ?? false;
+  const supported = preview?.preview.children.filter(child => child.supported) ?? [];
+  const unit = BigInt(config.creation.priceUnits);
+  const total = unit * BigInt(Math.max(1, selected.size));
+  const everything = preview ? supported.length === preview.preview.children.length && selected.size === supported.length : false;
+
+  return (
+    <div className="stack">
+      <Card title="Import from Polymarket">
+        <p className="small muted">
+          Paste the address of a Polymarket <strong>event</strong> or <strong>market</strong> page. Horizon reads it through its
+          own backend from a fixed Polymarket API address, and imports <strong>definitions only</strong>: the question, the outcome
+          names, the resolution criteria, the evidence source and the dates. Polymarket prices, liquidity, volume and settlement
+          are never imported and never appear as Horizon data.
+        </p>
+        <div className="field">
+          <label htmlFor="import-url">Polymarket page address</label>
+          <input id="import-url" value={url} onChange={event => setUrl(event.target.value)}
+            placeholder="https://polymarket.com/event/…" />
+          <div className="hint">
+            Accepts an event page (<code>/event/…</code> or <code>/sports/&lt;league&gt;/…</code>) or a single market
+            (<code>/event/…/…</code>, <code>/market/…</code>). A market address imports its event with only that market selected.
+          </div>
+        </div>
+        <button className="primary" disabled={busy || url.trim().length < 10} onClick={() => void fetchPreview()}>
+          {busy ? 'Reading…' : 'Fetch preview'}
+        </button>
+      </Card>
+
+      {rejection && (
+        <div className="stack">
+          {rejection.existing
+            ? <ExistingNotice existing={rejection.existing} />
+            : <Notice kind="error">{describe(rejection.reason)}</Notice>}
+        </div>
+      )}
+
+      {preview && (
+        <div className="stack">
+          {preview.existing && <ExistingNotice existing={preview.existing} />}
+          <Card
+            title={preview.preview.title}
+            actions={<a className="small" href={preview.source.url} target="_blank" rel="noreferrer noopener">Source page</a>}
+          >
+            <div className="row">
+              <Badge kind={preview.preview.exclusivity === 'EXCLUSIVE' ? 'warn' : 'closed'}>
+                {preview.preview.exclusivity === 'EXCLUSIVE' ? 'Exactly one winner' : 'Collection'}
+              </Badge>
+              {preview.preview.category && <span className="badge closed">{preview.preview.category}</span>}
+              {preview.source.kind === 'market' && <span className="badge closed">One market of this event</span>}
+            </div>
+            {preview.preview.description && <p className="muted" style={{ marginTop: 'var(--space-3)' }}>{preview.preview.description}</p>}
+            <p className="small muted">{preview.preview.exclusivityNote}</p>
+            <Warnings warnings={preview.preview.warnings} title="About this event" />
+          </Card>
+
+          <Card title={`Outcomes (${preview.preview.children.length})`}>
+            <p className="small muted" style={{ marginTop: 0 }}>
+              Each one becomes an independent binary market with its own contracts, collateral and resolution.
+              Untick anything you do not want; the price below follows what is ticked.
+            </p>
+            {preview.preview.children.map(child => (
+              <ChildPreview key={child.position} child={child}
+                checked={selected.has(child.position)} disabled={!child.supported || blocked}
+                onToggle={value => setSelected(current => {
+                  const next = new Set(current);
+                  if (value) next.add(child.position); else next.delete(child.position);
+                  return next;
+                })} />
+            ))}
+          </Card>
+
+          <Card title="Total cost">
+            <dl className="kv total">
+              <dt>Markets selected</dt><dd>{selected.size} of {preview.preview.children.length}</dd>
+              <dt>Price per market</dt><dd>{formatUnits(unit.toString(), config.creation.assetDecimals)} {config.creation.asset}</dd>
+              <dt>Group total</dt>
+              <dd><strong>{formatUnits(total.toString(), config.creation.assetDecimals)} {config.creation.asset}</strong></dd>
+              {config.creation.discountBps > 0 && (
+                <>
+                  <dt>With a verified credential</dt>
+                  <dd>{formatUnits((total * BigInt(10_000 - config.creation.discountBps) / 10_000n).toString(), config.creation.assetDecimals)} {config.creation.asset} — the discount applies once to the whole request</dd>
+                </>
+              )}
+            </dl>
+            {!everything && selected.size > 0 && (
+              <Notice kind="warn">
+                You are importing {selected.size} of the {preview.preview.children.length} outcomes on the source page. The event
+                will be shown as a selection of markets, never as the complete set of possibilities.
+              </Notice>
+            )}
+            {blocked && <Notice kind="error">This page cannot be imported as it stands. The reasons are listed above.</Notice>}
+            <button className="primary" disabled={busy || blocked || selected.size === 0 || Boolean(preview.existing?.inProgress) || (preview.existing?.created ?? 0) > 0}
+              onClick={() => void act(() => api.createImport({
+                url: preview.source.url, requesterKind: 'browser', requester: account ?? 'browser', positions: [...selected].sort((a, b) => a - b),
+              }, crypto.randomUUID())).then(result => {
+                if (!result) return;
+                if (result.ok) onStarted(result); else setRejection({ reason: result.reason, existing: result.existing });
+              })}>
+              {busy ? 'Importing…' : `Import ${selected.size} market${selected.size === 1 ? '' : 's'} for review`}
+            </button>
+            <p className="small muted" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
+              Importing only creates a draft you can review. Nothing is charged and no contract is deployed until you approve and pay.
+            </p>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChildPreview({ child, checked, disabled, onToggle }: {
+  child: ImportPreviewResult['preview']['children'][number];
+  checked: boolean; disabled: boolean; onToggle: (value: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`own-order ${child.supported ? '' : 'unsupported'}`}>
+      <div className="row between">
+        <label className="row" style={{ gap: 'var(--space-2)' }}>
+          <input type="checkbox" checked={checked} disabled={disabled} onChange={event => onToggle(event.target.checked)} />
+          <span><strong>{child.outcomeLabel}</strong></span>
+        </label>
+        <Badge kind={child.supported ? 'open' : 'no'}>{child.supported ? 'Can be created' : 'Cannot be created'}</Badge>
+      </div>
+      <div className="small muted" style={{ marginTop: 'var(--space-1)' }}>{child.question}</div>
+      <Warnings warnings={child.warnings} />
+      <button className="link" onClick={() => setOpen(!open)} aria-expanded={open}>
+        {open ? 'Hide details' : 'Show rules, dates and source'}
+      </button>
+      {open && (
+        <div className="stack" style={{ marginTop: 'var(--space-2)' }}>
+          <dl className="kv">
+            <dt>Source outcomes</dt><dd>{child.source.outcomes.join(' / ') || '—'}</dd>
+            <dt>Trading closes</dt><dd>{child.dates.tradingCloseAt ? dateTime(child.dates.tradingCloseAt) : 'unknown'}</dd>
+            <dt>Source start / end</dt>
+            <dd>
+              {child.dates.sourceGameStart ? dateTime(child.dates.sourceGameStart) : '—'} / {child.dates.sourceEndDate ? dateTime(child.dates.sourceEndDate) : '—'}
+            </dd>
+            <dt>Source page</dt><dd><a href={child.source.url} target="_blank" rel="noreferrer noopener">{child.source.slug}</a></dd>
+          </dl>
+          {child.ruleChanges.length > 0 && (
+            <Notice kind="info">
+              <strong>Changed for Horizon settlement</strong>
+              <ul style={{ margin: '.4rem 0 0', paddingLeft: '1.1rem' }}>
+                {child.ruleChanges.map((change, index) => <li key={index}>{change}</li>)}
+              </ul>
+            </Notice>
+          )}
+          <details>
+            <summary className="small">Source resolution criteria, as published</summary>
+            <p className="small scroll" style={{ whiteSpace: 'pre-wrap' }}>{child.source.description || 'The source publishes none.'}</p>
+          </details>
+          {child.draft && (
+            <details>
+              <summary className="small">Horizon resolution rules</summary>
+              <p className="small scroll" style={{ whiteSpace: 'pre-wrap' }}>{child.draft.rules}</p>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reviewing a request.
+// ---------------------------------------------------------------------------
+
 function Review({ request }: { request: CreationRequest }) {
-  const draft = request.draft;
+  const draft = asDraft(request);
   const warnings = request.review?.warnings ?? [];
   return (
     <Card title="Proposed market" actions={<span className="badge closed">{request.status}</span>}>
@@ -215,7 +581,162 @@ function Review({ request }: { request: CreationRequest }) {
   );
 }
 
-type Act = <T,>(run: () => Promise<T>) => Promise<T | undefined>;
+const CHILD_BADGE: Record<RequestChild['status'], 'open' | 'closed' | 'resolved' | 'warn' | 'no'> = {
+  PENDING: 'open', SKIPPED: 'closed', CREATING: 'warn', CREATED: 'resolved', FAILED: 'no',
+};
+const CHILD_LABEL: Record<RequestChild['status'], string> = {
+  PENDING: 'Selected', SKIPPED: 'Not selected', CREATING: 'Creating', CREATED: 'Created', FAILED: 'Failed',
+};
+
+/** The event, its children and the group price, with selection still open while it is a draft. */
+function GroupReview({ request, saved, busy, act, onChange }: {
+  request: CreationRequest; saved: Saved; busy: boolean; act: Act; onChange: (request: CreationRequest) => void;
+}) {
+  const config = useConfig();
+  const event = request.event;
+  const quote = request.groupQuote;
+  const editable = request.status === 'DRAFT';
+  const selected = request.children.filter(child => child.status !== 'SKIPPED');
+  const importReview = request.review?.import;
+
+  const toggle = async (position: number, on: boolean) => {
+    const next = new Set(selected.map(child => child.position));
+    if (on) next.add(position); else next.delete(position);
+    if (next.size === 0) return;
+    const result = await act(() => api.selectChildren(saved.id, saved.token, [...next].sort((a, b) => a - b)));
+    if (result) onChange(result.request);
+  };
+
+  return (
+    <div className="stack">
+      <Card title={event?.title ?? request.question} actions={<span className="badge closed">{request.status}</span>}>
+        <div className="row">
+          <Badge kind={event?.exclusivity === 'EXCLUSIVE' ? 'warn' : 'closed'}>
+            {event?.exclusivity === 'EXCLUSIVE' ? 'Exactly one winner' : 'Collection'}
+          </Badge>
+          {event?.category && <span className="badge closed">{event.category}</span>}
+          {event && event.source.provider !== 'horizon' && event.source.url && (
+            <a className="small" href={event.source.url} target="_blank" rel="noreferrer noopener">Imported from {event.source.provider}</a>
+          )}
+        </div>
+        {event?.description && <p className="muted" style={{ marginTop: 'var(--space-3)' }}>{event.description}</p>}
+        <p className="small muted">{event?.exclusivityNote}</p>
+        {event?.exclusivity === 'EXCLUSIVE' && (
+          <p className="small muted">
+            Horizon's resolution workflow refuses a second YES in this group. The market contracts hold no notion of the
+            group and do not enforce it, and each market keeps its own collateral.
+          </p>
+        )}
+        {event && !event.outcomesComplete && (
+          <Notice kind="warn">
+            These markets do not cover every outcome, so the event is shown as a selection of markets rather than the full
+            set of possibilities.
+          </Notice>
+        )}
+        {importReview && <Warnings warnings={importReview.eventWarnings} title="From the import" />}
+      </Card>
+
+      <Card title={`Markets in this event (${selected.length} selected of ${request.children.length})`}>
+        {editable
+          ? <p className="small muted" style={{ marginTop: 0 }}>
+              Changing the selection reprices the request and invalidates any approval, so it can only be done before you approve.
+            </p>
+          : <p className="small muted" style={{ marginTop: 0 }}>The selection is fixed once approved.</p>}
+        {request.children.map(child => {
+          const notes = child.notes?.warnings ?? [];
+          const changes = child.notes?.ruleChanges ?? [];
+          return (
+            <div key={child.position} className="own-order">
+              <div className="row between">
+                {editable
+                  ? <label className="row" style={{ gap: 'var(--space-2)' }}>
+                      <input type="checkbox" checked={child.status !== 'SKIPPED'} disabled={busy}
+                        onChange={event => void toggle(child.position, event.target.checked)} />
+                      <span><strong>{child.outcomeLabel}</strong></span>
+                    </label>
+                  : <strong>{child.outcomeLabel}</strong>}
+                <Badge kind={CHILD_BADGE[child.status]}>{CHILD_LABEL[child.status]}</Badge>
+              </div>
+              {child.draft && (
+                <>
+                  <div className="small muted" style={{ marginTop: 'var(--space-1)' }}>{child.draft.question}</div>
+                  <div className="small muted">Closes {dateTime(child.draft.closeAt)}</div>
+                </>
+              )}
+              <Warnings warnings={notes} />
+              {changes.length > 0 && (
+                <details>
+                  <summary className="small">{changes.length} change{changes.length === 1 ? '' : 's'} made for Horizon settlement</summary>
+                  <ul className="small" style={{ margin: '.4rem 0 0', paddingLeft: '1.1rem' }}>
+                    {changes.map((change, index) => <li key={index}>{change}</li>)}
+                  </ul>
+                </details>
+              )}
+              {child.draft && (
+                <details>
+                  <summary className="small">Resolution rules and evidence source</summary>
+                  <p className="small scroll" style={{ whiteSpace: 'pre-wrap' }}>{child.draft.rules}</p>
+                  <p className="small muted">Evidence source: {child.draft.evidenceSource}</p>
+                </details>
+              )}
+              {child.marketAddress && (
+                <p className="small" style={{ marginBottom: 0 }}>
+                  <a href={`#/markets/${child.marketAddress}`}>Open this market</a>
+                  {child.creationTxHash && <> · <TxLink hash={child.creationTxHash} /></>}
+                </p>
+              )}
+              {child.failureCode && <Notice kind="error">{child.failureDetail ?? child.failureCode}</Notice>}
+            </div>
+          );
+        })}
+      </Card>
+
+      <Card title="Group price">
+        <dl className="kv total">
+          <dt>Markets to create</dt><dd>{selected.length}</dd>
+          <dt>Price per market</dt><dd>{formatUnits(config.creation.priceUnits, config.creation.assetDecimals)} {config.creation.asset}</dd>
+          <dt>Group total</dt>
+          <dd><strong>{quote ? formatUnits(quote.totalUnits, quote.assetDecimals) : '—'} {config.creation.asset}</strong></dd>
+          {quote && quote.discountBps > 0 && (
+            <>
+              <dt>With a verified credential</dt>
+              <dd>{formatUnits(quote.discountedTotalUnits, quote.assetDecimals)} {config.creation.asset}</dd>
+            </>
+          )}
+        </dl>
+        <p className="small muted" style={{ marginBottom: 0 }}>{quote?.note}</p>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * The way out of a request the requester no longer wants. Before any money moves it is discarded
+ * outright, on the server as well as here, so the request cannot be resumed by accident and the
+ * payment intent behind it is cancelled. Once a payment has settled or is settling there is nothing
+ * to discard: the request is simply set aside, and its access token stays in this browser so the
+ * portfolio can still reach it.
+ */
+function StartOver({ request, busy, onDiscard, onRelease }: {
+  request: CreationRequest; busy: boolean; onDiscard: () => Promise<void>; onRelease: () => void;
+}) {
+  const discardable = isDiscardable(request.status, request.payment?.status);
+  if (request.status === 'CREATED') return null;
+  return (
+    <Card title="Start something different">
+      <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+        {discardable
+          ? `This request is at “${CREATION_LABEL[request.status] ?? request.status}” and nothing has been charged for it.
+             Discarding it cancels its payment request and frees you to draft another.`
+          : `A payment for this request has settled or is settling, so it cannot be discarded. Setting it aside starts a
+             fresh request; this one keeps its place in your portfolio, where you can pick it up again.`}
+      </p>
+      {discardable
+        ? <button disabled={busy} onClick={() => void onDiscard()}>{busy ? 'Discarding…' : 'Discard this request'}</button>
+        : <button disabled={busy} onClick={onRelease}>Set aside and start another</button>}
+    </Card>
+  );
+}
 
 function Verification({ request, saved, busy, act, onVerified, onSkip }: {
   request: CreationRequest; saved: { id: string; token: string }; busy: boolean; act: Act;
@@ -230,7 +751,8 @@ function Verification({ request, saved, busy, act, onVerified, onSkip }: {
     <Card title="Human verification (optional)">
       <p className="small muted">
         A World credential verified on the server lowers the creation price by {config.creation.discountBps / 100}%, once per credential per UTC day.
-        Only the credential's nullifier hash and type are stored. Verification is an abuse-resistance signal, not proof of forecasting skill.
+        {request.kind === 'GROUP' && ' The discount applies once to the whole request, not once per market.'}
+        {' '}Only the credential's nullifier hash and type are stored. Verification is an abuse-resistance signal, not proof of forecasting skill.
       </p>
       {request.verification && <Notice kind="ok">Verified {request.verification.credentialType} credential recorded at {dateTime(request.verification.verifiedAt)}.</Notice>}
       {verificationError && <Notice kind="error">{verificationError}</Notice>}
@@ -289,6 +811,7 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
   const [payer, setPayer] = useState('');
   const [walletPayer, setWalletPayer] = useState<string | undefined>();
   const [loaded, setLoaded] = useState(false);
+  const markets = request.children.filter(child => child.status !== 'SKIPPED').length;
 
   if (!loaded) {
     setLoaded(true);
@@ -314,7 +837,11 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
       {!requirements ? <p className="muted small">Requesting payment requirements…</p> : (
         <>
           <dl className="kv">
-            <dt>Amount</dt><dd><strong>{formatUnits(requirements.amount, requirements.extra.assetDecimals)} {config.creation.asset}</strong></dd>
+            <dt>Amount</dt>
+            <dd>
+              <strong>{formatUnits(requirements.amount, requirements.extra.assetDecimals)} {config.creation.asset}</strong>
+              {request.kind === 'GROUP' && <> — one charge covering {markets} market{markets === 1 ? '' : 's'}</>}
+            </dd>
             <dt>Network</dt><dd>{requirements.network} · scheme {requirements.scheme} · x402 v2</dd>
             <dt>Pay to</dt><dd className="mono">{requirements.payTo}</dd>
             <dt>Hedera fee payer</dt><dd className="mono">{requirements.extra.feePayer ?? 'unavailable'}</dd>
@@ -370,29 +897,73 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
   );
 }
 
+/**
+ * What happened after payment. For a group this is per child: each one is an independent
+ * deployment, so a failure names the market that failed and leaves the rest alone. A retry only
+ * ever deploys what is missing, and never charges again.
+ */
 function Outcome({ request, busy, onRefresh, onReset }: { request: CreationRequest; busy: boolean; onRefresh: () => Promise<void>; onReset: () => void }) {
+  const config = useConfig();
+  const group = request.kind === 'GROUP';
+  const selected = request.children.filter(child => child.status !== 'SKIPPED');
+  const done = selected.filter(child => child.status === 'CREATED').length;
+  const failed = selected.filter(child => child.status === 'FAILED');
   return (
     <Card title="Creation status" actions={<button disabled={busy} onClick={() => void onRefresh()}>Refresh</button>}>
       <dl className="kv">
-        <dt>Status</dt><dd>{request.status}</dd>
+        <dt>Status</dt><dd>{request.status}{group && <> · {done} of {selected.length} markets created</>}</dd>
         <dt>Payment</dt>
         <dd>
           {request.payment
-            ? <>{request.payment.status} · {formatUnits(request.payment.amountUnits, 8)} {request.payment.asset} · {request.payment.facilitator}
+            ? <>{request.payment.status} · {formatUnits(request.payment.amountUnits, config.creation.assetDecimals)} {config.creation.asset} · {request.payment.facilitator}
                 {request.payment.transactionRef && <> · <span className="mono">{request.payment.transactionRef}</span></>}</>
             : 'none'}
         </dd>
         <dt>Attempts</dt><dd>{request.attempts}</dd>
         {request.marketAddress && <><dt>Market</dt><dd><a href={`#/markets/${request.marketAddress}`}>{request.marketAddress}</a></dd></>}
         {request.creationTxHash && <><dt>Transaction</dt><dd><TxLink hash={request.creationTxHash} /></dd></>}
-        {request.failureCode && <><dt>Failure</dt><dd>{request.failureCode}</dd></>}
+        {request.failureCode && <><dt>Failure</dt><dd>{request.failureDetail ?? request.failureCode}</dd></>}
       </dl>
-      {request.status === 'PAID' && <Notice kind="info">Payment settled. The background worker is deploying the market; this page can be closed and reopened safely.</Notice>}
+
+      {group && (
+        <div className="scroll">
+          <table>
+            <thead><tr><th>Outcome</th><th>Status</th><th>Market</th><th>Transaction</th></tr></thead>
+            <tbody>
+              {selected.map(child => (
+                <tr key={child.position}>
+                  <td>{child.outcomeLabel}</td>
+                  <td>
+                    <Badge kind={CHILD_BADGE[child.status]}>{CHILD_LABEL[child.status]}</Badge>
+                    {child.failureDetail && <div className="small muted">{child.failureDetail}</div>}
+                  </td>
+                  <td>{child.marketAddress ? <Address value={child.marketAddress} /> : <span className="muted">—</span>}</td>
+                  <td>{child.creationTxHash ? <TxLink hash={child.creationTxHash} /> : <span className="muted">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {request.status === 'PAID' && <Notice kind="info">Payment settled. The background worker is creating {group ? 'these markets' : 'the market'}; this page can be closed and reopened safely.</Notice>}
       {request.status === 'CREATING' && <Notice kind="info">The creation job is running.</Notice>}
-      {request.status === 'FAILED' && <Notice kind="error">Creation failed after payment. The paid request stays recoverable and an operator can retry it without another charge.</Notice>}
+      {request.status === 'FAILED' && (
+        <Notice kind="error">
+          {group && failed.length > 0
+            ? <>
+                {failed.length} of {selected.length} market{failed.length === 1 ? '' : 's'} could not be created.
+                The {done} that succeeded exist and are never created again; the background job retries only what is missing,
+                and no further payment is taken. Refresh to follow it, or ask an operator to retry the request.
+              </>
+            : <>Creation failed after payment. The paid request stays recoverable and an operator can retry it without another charge.</>}
+        </Notice>
+      )}
       {request.status === 'CREATED' && (
         <Notice kind="ok">
-          The market is live. It appears in <a href="#/">Markets</a> once The Graph has indexed it.
+          {group
+            ? <>All {selected.length} markets are live. They appear under <a href={`#/events/${request.event?.slug}`}>{request.event?.title}</a> once The Graph has indexed them.</>
+            : <>The market is live. It appears in <a href="#/">Markets</a> once The Graph has indexed it.</>}
           <button className="link" style={{ marginLeft: '.5rem' }} onClick={onReset}>Start another request</button>
         </Notice>
       )}

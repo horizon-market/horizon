@@ -1,0 +1,96 @@
+{
+  "id": "990001",
+  "ticker": "horizon-import-unsupported-cases",
+  "slug": "horizon-import-unsupported-cases",
+  "title": "Import edge cases",
+  "description": "A synthetic Gamma event carrying one of each shape the importer has to refuse, so the refusals stay covered without depending on a live market that will eventually settle. The event publishes no end date of its own, so a market without one has nothing to fall back to.",
+  "resolutionSource": "https://example.invalid/rules",
+  "startDate": "2026-01-01T00:00:00Z",
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "negRisk": false,
+  "tags": [
+    {
+      "id": "9",
+      "label": "Testing",
+      "slug": "testing"
+    }
+  ],
+  "markets": [
+    {
+      "id": "990101",
+      "question": "Which candidate will win the synthetic election?",
+      "conditionId": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "slug": "synthetic-multi-outcome",
+      "description": "Resolves to the named candidate who wins. This market has more than two outcomes, so Horizon cannot create it as a fully collateralized YES/NO pair.",
+      "outcomes": "[\"Alice\", \"Bob\", \"Carol\"]",
+      "outcomePrices": "[\"0.4\", \"0.35\", \"0.25\"]",
+      "groupItemTitle": "Winner",
+      "endDate": "2026-12-01T00:00:00Z",
+      "active": true,
+      "closed": false,
+      "archived": false
+    },
+    {
+      "id": "990102",
+      "question": "Will the synthetic already-settled question have resolved YES?",
+      "conditionId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "slug": "synthetic-closed",
+      "description": "Resolves YES if the stated condition held. This market is already closed on the source, so there is nothing left to trade.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"1\", \"0\"]",
+      "groupItemTitle": "Already settled",
+      "endDate": "2026-12-01T00:00:00Z",
+      "closedTime": "2026-02-01T00:00:00Z",
+      "umaResolutionStatuses": "[\"resolved\"]",
+      "active": false,
+      "closed": true,
+      "archived": false
+    },
+    {
+      "id": "990103",
+      "question": "Will Team C win the synthetic bracket?",
+      "conditionId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+      "slug": "synthetic-placeholder",
+      "description": "Resolves YES if the named team wins. The team is not known yet, so the source is holding a slot open under a placeholder label.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"0.05\", \"0.95\"]",
+      "groupItemTitle": "Team C",
+      "endDate": "2026-12-01T00:00:00Z",
+      "active": true,
+      "closed": false,
+      "archived": false
+    },
+    {
+      "id": "990104",
+      "question": "Will the synthetic undated question be confirmed?",
+      "conditionId": "0x4444444444444444444444444444444444444444444444444444444444444444",
+      "slug": "synthetic-no-dates",
+      "description": "Resolves YES if the stated condition is confirmed by the named source. No end date is published for this market, so Horizon has no time to close trading at.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"0.5\", \"0.5\"]",
+      "groupItemTitle": "Undated",
+      "active": true,
+      "closed": false,
+      "archived": false
+    },
+    {
+      "id": "990105",
+      "question": "Will the synthetic well-formed question be confirmed before the close time?",
+      "conditionId": "0x5555555555555555555555555555555555555555555555555555555555555555",
+      "slug": "synthetic-supported",
+      "description": "Resolves YES if the stated condition is confirmed by the named public source before the close time, and NO otherwise. This is the one market in the fixture that Horizon can create as it stands.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"0.5\", \"0.5\"]",
+      "resolutionSource": "https://example.invalid/rules",
+      "groupItemTitle": "Supported outcome",
+      "startDate": "2026-01-01T00:00:00Z",
+      "endDate": "2026-12-01T00:00:00Z",
+      "gameStartTime": "2026-11-30 18:00:00+00",
+      "active": true,
+      "closed": false,
+      "archived": false
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import { ErrorBox, Loading, Logo, Notice } from './components/Ui';
 import { currentAccount, connect, describeWalletError, walletAvailable } from './wallet';
 import { Markets } from './pages/Markets';
 import { MarketDetail } from './pages/MarketDetail';
+import { EventDetail } from './pages/EventDetail';
 import { Holdings } from './pages/Holdings';
 import { Curves } from './pages/Curves';
 import { CreateMarket } from './pages/CreateMarket';
@@ -93,6 +94,8 @@ function Page({ route }: { route: ReturnType<typeof useRoute> }) {
   // Keyed on the address: the component sits at a fixed position, so without this, moving from one
   // market to another would keep the previous market's outcome, ticket tab and half-written order.
   if (section === 'markets' && parameter) return <MarketDetail key={parameter} market={parameter} query={route.query} />;
+  // An event has its own address; a child market keeps the address it always had.
+  if (section === 'events' && parameter) return <EventDetail key={parameter} slug={parameter} />;
   if (section === 'holdings') return <Holdings query={route.query} />;
   if (section === 'curves') return <Curves />;
   // Curves are published from the market they belong to now, so the old standalone address forwards

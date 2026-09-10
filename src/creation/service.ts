@@ -1,8 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { PaymentsConfig, WorldConfig } from '../config.js';
-import { creationPrice, utcDay } from './pricing.js';
-import { draftHash, draftSchema, DraftError, type MarketContext, type MarketDraft, type MarketDraftProvider } from './types.js';
+import type { ImportsConfig, PaymentsConfig, WorldConfig } from '../config.js';
+import { creationPrice, groupPrice, utcDay } from './pricing.js';
+import {
+  draftHash, draftSchema, DraftError, eventDraftSchema, groupPlanHash, provenanceSchema,
+  type ChildPlan, type EventDraft, type GroupPlan, type MarketContext, type MarketDraft, type MarketDraftProvider, type Provenance,
+} from './types.js';
+import { GammaClient, ImportError, parsePolymarketUrl } from '../imports/polymarket.js';
+import { normalizeEvent, outcomesComplete, slugify, snapshotMarket, type NormalizedEvent } from '../imports/normalize.js';
 import { buildRequirements, decodePayment, paymentMatches, paymentNonce, payloadFingerprint, PaymentPayloadError, PaymentRejectedError, SettlementAmbiguousError, type PaymentFacilitator } from '../payments/x402.js';
 import { createRpContext, proofSchema, VerificationRejectedError, VerificationUnavailableError, type HumanVerifier, type VerificationProof } from '../world/verifier.js';
 import type { MarketDeployer } from './onchain.js';
@@ -42,11 +47,30 @@ export type CreationDependencies = {
   context: () => Promise<{ available: boolean; context: MarketContext }>;
   enqueue?: (requestId: string) => Promise<void>;
   closeBounds?: { minSeconds: number; maxSeconds: number };
+  imports?: ImportsConfig;
+  /** Injectable so the import path is testable without reaching Polymarket. */
+  gamma?: GammaClient;
 };
 
+export type Requester = { requesterKind: 'browser' | 'agent'; requester: string };
 export type CreateDraftInput = { idempotencyKey: string; question: string; requesterKind: 'browser' | 'agent'; requester: string; category?: string; closeAt?: string };
+/** A manually authored group: one event, and the binary question of each child. */
+export type CreateGroupInput = Requester & {
+  idempotencyKey: string;
+  event: { title: string; description?: string; category?: string; exclusivity: 'COLLECTION' | 'EXCLUSIVE'; outcomesComplete?: boolean };
+  children: { question: string; outcomeLabel: string; closeAt?: string }[];
+};
+export type ImportInput = Requester & { idempotencyKey: string; url: string; positions?: number[] };
+
+const REQUEST_INCLUDE = {
+  payment: true, verification: true,
+  children: { orderBy: { position: 'asc' } },
+  event: { include: { members: { orderBy: { position: 'asc' } } } },
+} as const;
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
+
+type ChildRow = { id: string; position: number; outcomeLabel: string; draft: Prisma.JsonValue; status: string };
 
 export class CreationService {
   constructor(private deps: CreationDependencies) {}
@@ -61,7 +85,7 @@ export class CreationService {
   }
 
   private async load(id: string, token: string | undefined) {
-    const request = await this.deps.db.creationRequest.findUnique({ where: { id }, include: { payment: true, verification: true } });
+    const request = await this.deps.db.creationRequest.findUnique({ where: { id }, include: REQUEST_INCLUDE });
     if (!request) throw new WorkflowError('unknown_request', 404);
     this.authorize(request, token);
     return request;
@@ -75,9 +99,53 @@ export class CreationService {
     return closeAt;
   }
 
+  /**
+   * Rebuilds the approval plan for a group request from stored rows. Nothing here is taken from
+   * the caller: the event metadata, the children, the selection and the price are all read back,
+   * so a client cannot approve a plan the server does not itself hold.
+   */
+  private groupPlan(request: { draft: Prisma.JsonValue; children: ChildRow[]; event: { sourceProvider: string; sourceEventId: string | null; sourceSlug: string | null; sourceUrl: string | null; importedAt: Date | null } | null }): GroupPlan {
+    const event = eventDraftSchema.parse(request.draft);
+    const children: ChildPlan[] = [...request.children].sort((a, b) => a.position - b.position).map(child => ({
+      position: child.position, outcomeLabel: child.outcomeLabel,
+      draft: draftSchema.parse(child.draft), selected: child.status !== 'SKIPPED',
+    }));
+    const quantity = children.filter(child => child.selected).length;
+    const baseUnits = this.deps.payments.priceUnits;
+    const source = request.event;
+    const provenance: Provenance | undefined = source && source.sourceProvider !== 'horizon' && source.importedAt
+      ? provenanceSchema.parse({
+        provider: source.sourceProvider, eventId: source.sourceEventId ?? '', eventSlug: source.sourceSlug ?? '',
+        url: source.sourceUrl ?? '', importedAt: source.importedAt.toISOString(),
+      })
+      : undefined;
+    return { event, children, pricing: { baseUnits, quantity, totalUnits: baseUnits * BigInt(quantity) }, provenance };
+  }
+
+  /**
+   * The hash a request is approved against. A standalone request binds to its single draft, exactly
+   * as it did before events existed; a group binds to its whole plan.
+   */
+  private planHash(request: { kind: string; draft: Prisma.JsonValue; draftHash: string | null; children: ChildRow[]; event: Parameters<CreationService['groupPlan']>[0]['event'] }): string {
+    if (request.kind !== 'GROUP') return request.draftHash ?? '';
+    return groupPlanHash(this.groupPlan(request));
+  }
+
+  /** The price a group shows before approval, and the price its plan hash is bound to. */
+  groupQuote(quantity: number) {
+    const price = groupPrice(this.deps.payments.priceUnits, Math.max(1, quantity), this.deps.payments.discountBps, false);
+    const discounted = groupPrice(this.deps.payments.priceUnits, Math.max(1, quantity), this.deps.payments.discountBps, true);
+    return {
+      unitUnits: price.unitUnits.toString(), quantity, totalUnits: price.payableUnits.toString(),
+      discountedTotalUnits: discounted.payableUnits.toString(), discountBps: this.deps.payments.discountBps,
+      asset: this.deps.payments.asset, assetDecimals: this.deps.payments.assetDecimals, network: this.deps.payments.network,
+      note: 'One creation charge per market, the same price a standalone market pays. A verified credential discounts the group total once, not once per market.',
+    };
+  }
+
   /** Draft creation is idempotent by key: a retried request never produces a second draft. */
   async createDraft(input: CreateDraftInput) {
-    const existing = await this.deps.db.creationRequest.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { payment: true, verification: true } });
+    const existing = await this.deps.db.creationRequest.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: REQUEST_INCLUDE });
     if (existing) return { request: existing, token: undefined, replay: true };
     const { available, context } = await this.deps.context();
     let result;
@@ -94,9 +162,308 @@ export class CreationService {
         duplicates: { duplicateCheck: available ? 'live_graph' : 'unavailable_not_configured', groundedOnBlock: result.groundedOnBlock,
           rationale: result.rationale, warnings: result.duplicates } as unknown as Prisma.InputJsonValue,
       },
-      include: { payment: true, verification: true },
+      include: REQUEST_INCLUDE,
     });
     return { request: created, token, replay: false };
+  }
+
+  // -------------------------------------------------------------------------
+  // Events: manually authored groups, and imports.
+  //
+  // A group request is the same workflow as a standalone one — draft, review,
+  // approve, pay, create — with several children behind one payment. What is
+  // stored is metadata about markets, never a market: an imported child is not a
+  // market until it is deployed on chain and The Graph indexes it.
+  // -------------------------------------------------------------------------
+
+  private gamma(): GammaClient {
+    const config = this.deps.imports;
+    if (!config?.enabled) throw new WorkflowError('imports_not_configured', 503);
+    return this.deps.gamma ?? new GammaClient(config.polymarketApiOrigin, undefined, config.timeoutMs);
+  }
+
+  private maxChildren() { return this.deps.imports?.maxChildren ?? 24; }
+
+  /** A stable, readable address for the event page. Collisions get a short suffix. */
+  private async uniqueSlug(base: string): Promise<string> {
+    const root = slugify(base);
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const candidate = attempt === 0 ? root : `${root}-${randomBytes(3).toString('hex')}`;
+      if (!await this.deps.db.marketEvent.findUnique({ where: { slug: candidate }, select: { id: true } })) return candidate;
+    }
+    return `${root}-${randomBytes(6).toString('hex')}`;
+  }
+
+  private async existingImport(provider: string, sourceEventId: string) {
+    return this.deps.db.marketEvent.findUnique({
+      where: { sourceProvider_sourceEventId: { sourceProvider: provider, sourceEventId } },
+      include: { members: { orderBy: { position: 'asc' } }, requests: { orderBy: { createdAt: 'desc' }, take: 5 } },
+    });
+  }
+
+  /**
+   * What a previously imported source event became on Horizon. Shown before anything is charged,
+   * so a duplicate import is answered with links to the existing markets rather than a second bill.
+   */
+  private describeExisting(event: Awaited<ReturnType<CreationService['existingImport']>>) {
+    if (!event) return undefined;
+    const live = event.requests.filter(request => request.status !== 'ABANDONED');
+    return {
+      eventId: event.id, slug: event.slug, title: event.title, status: event.status,
+      importedAt: event.importedAt, sourceUrl: event.sourceUrl,
+      markets: event.members.map(member => ({ position: member.position, outcomeLabel: member.outcomeLabel,
+        question: member.question, marketAddress: member.marketAddress, sourceSlug: member.sourceSlug })),
+      created: event.members.filter(member => member.marketAddress).length,
+      requests: live.map(request => ({ id: request.id, status: request.status, createdAt: request.createdAt })),
+      inProgress: live.some(request => !['CREATED', 'FAILED'].includes(request.status)),
+    };
+  }
+
+  /**
+   * Reads one Polymarket page address and reports exactly what Horizon would create from it.
+   * No row is written, nothing is charged, and no contract is touched: this is the review step.
+   */
+  async previewImport(url: string) {
+    const reference = parsePolymarketUrl(url);
+    const { event, focusMarketSlug } = await this.gamma().resolve(reference);
+    const preview = normalizeEvent(event, {
+      bounds: this.bounds(), focusMarketSlug, maxChildren: this.maxChildren(),
+    });
+    const existing = this.describeExisting(await this.existingImport(preview.source.provider, preview.source.eventId));
+    const selected = new Set(preview.children.filter(child => child.preselected).map(child => child.position));
+    return {
+      source: reference, preview, existing,
+      quote: this.groupQuote(selected.size),
+      // Polymarket's own prices, liquidity, volume and settlement are not imported and never
+      // appear as Horizon data. Only the definition crosses the boundary.
+      importPolicy: 'definitions_only',
+    };
+  }
+
+  private assertSelectable(preview: NormalizedEvent, positions: number[] | undefined) {
+    const supported = preview.children.filter(child => child.supported);
+    const chosen = positions === undefined
+      ? preview.children.filter(child => child.preselected).map(child => child.position)
+      : [...new Set(positions)];
+    if (chosen.length === 0) throw new WorkflowError('import_selection_empty', 422);
+    for (const position of chosen) {
+      if (!supported.some(child => child.position === position)) throw new WorkflowError('import_selection_unsupported', 422);
+    }
+    return new Set(chosen);
+  }
+
+  /**
+   * Creates the durable event, the creation request and its children from one source page.
+   *
+   * Idempotency has two locks. The request's own key answers a retried call with the same request,
+   * as it always has. The unique (sourceProvider, sourceEventId) on the event answers a *different*
+   * caller importing the same source: the second one is told what already exists and is never given
+   * a second request to pay for.
+   */
+  async createImport(input: ImportInput) {
+    const replayed = await this.deps.db.creationRequest.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: REQUEST_INCLUDE });
+    if (replayed) return { ok: true as const, request: replayed, token: undefined, replay: true };
+    const { source, preview, existing } = await this.previewImport(input.url);
+    if (existing && (existing.inProgress || existing.created > 0)) {
+      return { ok: false as const, reason: existing.created > 0 ? 'already_imported' : 'import_in_progress', preview, existing, source };
+    }
+    if (preview.warnings.some(warning => warning.severity === 'blocking')) {
+      return { ok: false as const, reason: 'import_not_supported', preview, existing, source };
+    }
+    const selected = this.assertSelectable(preview, input.positions);
+    const complete = outcomesComplete(preview, selected);
+    const eventDraft = eventDraftSchema.parse({
+      title: preview.title, description: preview.description, category: preview.category, tags: preview.tags,
+      imageUrl: preview.imageUrl, iconUrl: preview.iconUrl,
+      exclusivity: preview.exclusivity, exclusivityNote: preview.exclusivityNote, outcomesComplete: complete,
+    });
+    const supported = preview.children.filter(child => child.supported);
+    const token = randomBytes(32).toString('hex');
+    const slug = await this.uniqueSlug(preview.title);
+    const importedAt = new Date();
+    const review = {
+      duplicateCheck: 'source_import', groundedOnBlock: -1,
+      rationale: `Imported from ${source.url}. Definitions only: the source's prices, liquidity, volume and settlement state are not imported and never appear as Horizon data.`,
+      warnings: [],
+      import: {
+        provider: preview.source.provider, url: source.url, kind: source.kind,
+        eventId: preview.source.eventId, eventSlug: preview.source.slug,
+        importedAt: importedAt.toISOString(),
+        eventWarnings: preview.warnings,
+        children: preview.children.map(child => ({
+          position: child.position, outcomeLabel: child.outcomeLabel, question: child.question,
+          supported: child.supported, selected: selected.has(child.position),
+          warnings: child.warnings, ruleChanges: child.ruleChanges, dates: child.dates,
+          source: { marketId: child.source.marketId, slug: child.source.slug, url: child.source.url,
+            conditionId: child.source.conditionId, outcomes: child.source.outcomes,
+            resolutionSource: child.source.resolutionSource, closed: child.source.closed },
+        })),
+        // Preserved verbatim so a later reader can compare Horizon's wording against the source's.
+        sourceRules: preview.children.map(child => ({ position: child.position, description: child.source.description })),
+      },
+    };
+
+    let created;
+    try {
+      created = await this.deps.db.$transaction(async tx => {
+        const event = await tx.marketEvent.create({
+          data: {
+            slug, title: eventDraft.title, description: eventDraft.description, category: eventDraft.category,
+            tags: eventDraft.tags as unknown as Prisma.InputJsonValue,
+            imageUrl: eventDraft.imageUrl || null, iconUrl: eventDraft.iconUrl || null,
+            exclusivity: eventDraft.exclusivity, exclusivityNote: eventDraft.exclusivityNote,
+            outcomesComplete: complete, status: 'DRAFT', createdBy: input.requester,
+            sourceProvider: preview.source.provider, sourceEventId: preview.source.eventId,
+            sourceSlug: preview.source.slug, sourceUrl: source.url, importedAt,
+            sourceSnapshot: preview.snapshot as unknown as Prisma.InputJsonValue,
+            members: {
+              create: supported.map(child => ({
+                position: child.position, outcomeLabel: child.outcomeLabel, question: child.question,
+                sourceMarketId: child.source.marketId, sourceSlug: child.source.slug, sourceUrl: child.source.url,
+                sourceSnapshot: { rules: child.source.description, resolutionSource: child.source.resolutionSource,
+                  conditionId: child.source.conditionId, outcomes: child.source.outcomes,
+                  dates: child.dates } as unknown as Prisma.InputJsonValue,
+              })),
+            },
+          },
+        });
+        const request = await tx.creationRequest.create({
+          data: {
+            idempotencyKey: input.idempotencyKey, question: eventDraft.title, kind: 'GROUP', eventId: event.id,
+            requesterKind: input.requesterKind, requester: input.requester,
+            accessTokenHash: hashToken(token).toString('hex'), status: 'DRAFT',
+            draft: eventDraft as unknown as Prisma.InputJsonValue,
+            draftProvider: `import:${preview.source.provider}`, draftMode: 'live',
+            duplicates: review as unknown as Prisma.InputJsonValue,
+            children: {
+              create: supported.map(child => ({
+                position: child.position, outcomeLabel: child.outcomeLabel,
+                draft: child.draft as unknown as Prisma.InputJsonValue, draftHash: draftHash(child.draft!),
+                status: selected.has(child.position) ? 'PENDING' : 'SKIPPED',
+                notes: { warnings: child.warnings, ruleChanges: child.ruleChanges } as unknown as Prisma.InputJsonValue,
+              })),
+            },
+          },
+          include: REQUEST_INCLUDE,
+        });
+        return tx.creationRequest.update({
+          where: { id: request.id },
+          data: { draftHash: this.planHash(request) },
+          include: REQUEST_INCLUDE,
+        });
+      });
+    } catch (error) {
+      // Two callers raced for the same source event; the loser reports what the winner made.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const raced = this.describeExisting(await this.existingImport(preview.source.provider, preview.source.eventId));
+        return { ok: false as const, reason: 'import_in_progress', preview, existing: raced, source };
+      }
+      throw error;
+    }
+    return { ok: true as const, request: created, token, replay: false };
+  }
+
+  /**
+   * A manually authored group. Each child is drafted through the same provider a standalone market
+   * uses, so the rules, evidence source and close time a reviewer sees are produced the same way.
+   */
+  async createGroup(input: CreateGroupInput) {
+    const existing = await this.deps.db.creationRequest.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: REQUEST_INCLUDE });
+    if (existing) return { request: existing, token: undefined, replay: true };
+    if (input.children.length < 1 || input.children.length > this.maxChildren()) throw new WorkflowError('group_child_count_out_of_range', 422);
+    const { available, context } = await this.deps.context();
+    const drafted: { position: number; outcomeLabel: string; draft: MarketDraft; rationale: string; duplicates: unknown }[] = [];
+    for (const [position, child] of input.children.entries()) {
+      let result;
+      try {
+        result = await this.deps.provider.draft({
+          question: child.question, category: input.event.category, closeAt: child.closeAt, requesterKind: input.requesterKind,
+        }, context);
+      } catch (error) { throw new WorkflowError(error instanceof DraftError ? error.message : 'draft_failed', 502); }
+      this.validateCloseAt(result.draft);
+      drafted.push({ position, outcomeLabel: child.outcomeLabel.trim().slice(0, 80) || result.draft.question.slice(0, 80), draft: result.draft, rationale: result.rationale, duplicates: result.duplicates });
+    }
+    const eventDraft = eventDraftSchema.parse({
+      title: input.event.title, description: input.event.description ?? '',
+      category: input.event.category?.trim() || drafted[0]!.draft.category,
+      tags: [], imageUrl: '', iconUrl: '',
+      exclusivity: input.event.exclusivity,
+      exclusivityNote: input.event.exclusivity === 'EXCLUSIVE'
+        ? 'The author states that exactly one of these markets resolves YES. Horizon checks proposed resolutions against already resolved siblings; the market contracts themselves know nothing about the group, and each child holds its own collateral.'
+        : 'These markets are grouped for context only. Nothing here says one of them must win, and their prices need not add up to 100%.',
+      outcomesComplete: input.event.outcomesComplete ?? false,
+    });
+    const token = randomBytes(32).toString('hex');
+    const slug = await this.uniqueSlug(eventDraft.title);
+    const created = await this.deps.db.$transaction(async tx => {
+      const event = await tx.marketEvent.create({
+        data: {
+          slug, title: eventDraft.title, description: eventDraft.description, category: eventDraft.category,
+          tags: eventDraft.tags as unknown as Prisma.InputJsonValue, exclusivity: eventDraft.exclusivity,
+          exclusivityNote: eventDraft.exclusivityNote, outcomesComplete: eventDraft.outcomesComplete,
+          status: 'DRAFT', createdBy: input.requester, sourceProvider: 'horizon',
+          members: { create: drafted.map(child => ({ position: child.position, outcomeLabel: child.outcomeLabel, question: child.draft.question })) },
+        },
+      });
+      const request = await tx.creationRequest.create({
+        data: {
+          idempotencyKey: input.idempotencyKey, question: eventDraft.title, kind: 'GROUP', eventId: event.id,
+          requesterKind: input.requesterKind, requester: input.requester,
+          accessTokenHash: hashToken(token).toString('hex'), status: 'DRAFT',
+          draft: eventDraft as unknown as Prisma.InputJsonValue,
+          draftProvider: this.deps.provider.name, draftMode: this.deps.provider.mode,
+          duplicates: {
+            duplicateCheck: available ? 'live_graph' : 'unavailable_not_configured', groundedOnBlock: context.indexedBlock,
+            rationale: drafted[0]!.rationale,
+            warnings: drafted.flatMap(child => child.duplicates as unknown[]),
+          } as unknown as Prisma.InputJsonValue,
+          children: {
+            create: drafted.map(child => ({
+              position: child.position, outcomeLabel: child.outcomeLabel,
+              draft: child.draft as unknown as Prisma.InputJsonValue, draftHash: draftHash(child.draft), status: 'PENDING',
+            })),
+          },
+        },
+        include: REQUEST_INCLUDE,
+      });
+      return tx.creationRequest.update({ where: { id: request.id }, data: { draftHash: this.planHash(request) }, include: REQUEST_INCLUDE });
+    });
+    return { request: created, token, replay: false };
+  }
+
+  /**
+   * Chooses which children of a group are created. Only available before approval, and it always
+   * rewrites the plan hash: changing the selection changes both the outcome set and the price, so
+   * any approval taken against the old plan is worthless afterwards.
+   */
+  async selectChildren(id: string, token: string | undefined, positions: number[]) {
+    const request = await this.load(id, token);
+    if (request.kind !== 'GROUP') throw new WorkflowError('selection_not_available_for_single_request', 409);
+    if (request.status !== 'DRAFT') throw new WorkflowError('selection_after_approval', 409);
+    const wanted = new Set(positions);
+    if (wanted.size === 0) throw new WorkflowError('import_selection_empty', 422);
+    const known = new Set(request.children.map(child => child.position));
+    for (const position of wanted) if (!known.has(position)) throw new WorkflowError('import_selection_unsupported', 422);
+    return this.deps.db.$transaction(async tx => {
+      for (const child of request.children) {
+        const status = wanted.has(child.position) ? 'PENDING' : 'SKIPPED';
+        if (child.status !== status) await tx.creationChild.update({ where: { id: child.id }, data: { status } });
+      }
+      const reloaded = await tx.creationRequest.findUniqueOrThrow({ where: { id }, include: REQUEST_INCLUDE });
+      // A partial selection is never presented as an exhaustive outcome set.
+      const draft = eventDraftSchema.parse(reloaded.draft);
+      const complete = draft.outcomesComplete && reloaded.children.every(child => child.status !== 'SKIPPED');
+      const updatedDraft: EventDraft = { ...draft, outcomesComplete: complete };
+      const withDraft = { ...reloaded, draft: updatedDraft as unknown as Prisma.JsonValue };
+      // The durable event carries the same claim, so no screen reading the event row can call a
+      // narrowed selection exhaustive either.
+      if (reloaded.eventId) await tx.marketEvent.update({ where: { id: reloaded.eventId }, data: { outcomesComplete: complete } });
+      return tx.creationRequest.update({
+        where: { id },
+        data: { draft: updatedDraft as unknown as Prisma.InputJsonValue, draftHash: this.planHash(withDraft) },
+        include: REQUEST_INCLUDE,
+      });
+    });
   }
 
   async get(id: string, token: string | undefined) { return this.load(id, token); }
@@ -118,7 +485,20 @@ export class CreationService {
       if (payment) {
         await tx.paymentIntent.update({ where: { id: payment.id, status: payment.status }, data: { status: 'CANCELLED', failureCode: 'request_abandoned' } });
       }
-      return tx.creationRequest.update({ where: { id, status: request.status }, data: { status }, include: { payment: true, verification: true } });
+      const updated = await tx.creationRequest.update({ where: { id, status: request.status }, data: { status }, include: REQUEST_INCLUDE });
+      // A discarded group leaves no half-made event behind, and — for an import — releases the
+      // source event so the same page can be imported again rather than being locked out forever.
+      if (request.eventId) {
+        const event = await tx.marketEvent.findUnique({
+          where: { id: request.eventId },
+          include: { members: { select: { marketAddress: true } }, requests: { select: { id: true, status: true } } },
+        });
+        const orphaned = event && event.status === 'DRAFT'
+          && !event.members.some(member => member.marketAddress)
+          && event.requests.every(other => other.id === id || other.status === 'ABANDONED');
+        if (orphaned) await tx.marketEvent.delete({ where: { id: event.id } });
+      }
+      return updated;
     });
   }
 
@@ -129,7 +509,7 @@ export class CreationService {
    */
   async listByRequester(requester: string, take = 50) {
     return this.deps.db.creationRequest.findMany({
-      where: { requester }, orderBy: { createdAt: 'desc' }, take, include: { payment: true, verification: true },
+      where: { requester }, orderBy: { createdAt: 'desc' }, take, include: REQUEST_INCLUDE,
     });
   }
 
@@ -140,16 +520,41 @@ export class CreationService {
     catch { throw new WorkflowError('verification_unavailable', 503); }
   }
 
-  /** A human approves the exact reviewed draft; a changed draft invalidates the approval hash. */
+  /**
+   * A human approves the exact reviewed draft; a changed draft invalidates the approval hash.
+   *
+   * For a group the hash covers the whole plan — event metadata, the selected children's drafts,
+   * their labels and order, the provenance and the price shown — and it is recomputed here from
+   * stored rows rather than trusted, so a plan that moved between review and approval is refused.
+   */
   async approve(id: string, token: string | undefined, approvedHash: string) {
     const request = await this.load(id, token);
     if (request.status === 'APPROVED' && request.approvedHash === approvedHash) return request;
     const status = transition(request.status as Status, 'approve');
-    if (!request.draftHash || request.draftHash !== approvedHash) throw new WorkflowError('draft_hash_mismatch', 422);
+    const current = this.planHash(request);
+    if (!current || current !== approvedHash || request.draftHash !== current) throw new WorkflowError('draft_hash_mismatch', 422);
+    if (request.kind === 'GROUP') {
+      const plan = this.groupPlan(request);
+      const selected = plan.children.filter(child => child.selected);
+      if (selected.length === 0) throw new WorkflowError('import_selection_empty', 422);
+      for (const child of selected) this.validateCloseAt(child.draft);
+      // Durable membership now matches what will actually be created; a deselected child is not
+      // part of the event, so browsing never lists an outcome nobody can trade.
+      const keep = new Set(selected.map(child => child.position));
+      return this.deps.db.$transaction(async tx => {
+        if (request.eventId) {
+          await tx.eventMarket.deleteMany({ where: { eventId: request.eventId, marketAddress: null, position: { notIn: [...keep] } } });
+        }
+        return tx.creationRequest.update({
+          where: { id, status: request.status }, data: { status, approvedAt: new Date(), approvedHash },
+          include: REQUEST_INCLUDE,
+        });
+      });
+    }
     this.validateCloseAt(draftSchema.parse(request.draft));
     return this.deps.db.creationRequest.update({
       where: { id, status: request.status }, data: { status, approvedAt: new Date(), approvedHash },
-      include: { payment: true, verification: true },
+      include: REQUEST_INCLUDE,
     });
   }
 
@@ -197,7 +602,11 @@ export class CreationService {
           ? `Verified ${verification.credentialType} credential; the human discount applies once per credential per UTC day.`
           : 'This credential already used its discounted creation today, so the standard price applies.';
       }
-      const price = creationPrice(this.deps.payments.priceUnits, this.deps.payments.discountBps, eligible);
+      // A group is charged per market at the standalone price; the discount applies once, to the
+      // whole request, so a credential is worth one discounted request per day and not one per child.
+      const quantity = request.kind === 'GROUP' ? request.children.filter(child => child.status !== 'SKIPPED').length : 1;
+      if (quantity < 1) throw new WorkflowError('import_selection_empty', 422);
+      const price = groupPrice(this.deps.payments.priceUnits, quantity, this.deps.payments.discountBps, eligible);
       const payment = await tx.paymentIntent.create({
         data: {
           requestId: id, status: 'REQUIRED', network: this.deps.payments.network, asset: this.deps.payments.asset,
@@ -208,7 +617,7 @@ export class CreationService {
       const updated = await tx.creationRequest.update({
         where: { id, status: request.status },
         data: { status: 'PAYMENT_REQUIRED', discountBps: price.discountBps, discountNote: note, priceUnits: price.payableUnits.toString() },
-        include: { payment: true, verification: true },
+        include: REQUEST_INCLUDE,
       });
       return { request: updated, payment };
     });
@@ -271,7 +680,7 @@ export class CreationService {
           where: { id: payment.id },
           data: { status: 'SETTLED', transactionRef: settled.transaction, payer: settled.payer, payloadHash: payloadFingerprint(header), settledAt: new Date(), failureCode: null },
         }),
-        this.deps.db.creationRequest.update({ where: { id }, data: { status: 'PAID' }, include: { payment: true, verification: true } }),
+        this.deps.db.creationRequest.update({ where: { id }, data: { status: 'PAID' }, include: REQUEST_INCLUDE }),
       ]);
       await this.deps.enqueue?.(id).catch(() => undefined);
       return { request: updatedRequest, payment: updatedPayment, settlement: settled, replay: false };
@@ -287,13 +696,14 @@ export class CreationService {
 
   /** Runs the paid creation step. Safe to retry: the registry is checked before any broadcast. */
   async runCreation(id: string) {
-    const request = await this.deps.db.creationRequest.findUnique({ where: { id }, include: { payment: true } });
+    const request = await this.deps.db.creationRequest.findUnique({ where: { id }, include: REQUEST_INCLUDE });
     if (!request) throw new WorkflowError('unknown_request', 404);
     if (request.status === 'CREATED') return request;
     if (request.payment?.status !== 'SETTLED') throw new WorkflowError('creation_before_settlement');
     if (!this.deps.deployer) throw new WorkflowError('creation_not_configured', 503);
     const status = transition(request.status as Status, request.status === 'FAILED' ? 'retry' : 'start_creation');
     await this.deps.db.creationRequest.update({ where: { id }, data: { status, attempts: { increment: 1 }, failureCode: null, failureDetail: null } });
+    if (request.kind === 'GROUP') return this.runGroupCreation(request);
     const draft = draftSchema.parse(request.draft);
     if (request.approvedHash !== draftHash(draft)) throw new WorkflowError('draft_not_approved');
     try {
@@ -309,5 +719,76 @@ export class CreationService {
       await this.deps.db.creationRequest.update({ where: { id }, data: { status: 'FAILED', failureCode: 'creation_failed', failureDetail: code } });
       throw error;
     }
+  }
+
+  /**
+   * Deploys the selected children of one paid group request, in order.
+   *
+   * Children are independent markets, so one failing does not stop the others: every child is
+   * attempted, and the request fails only if some child did. A retry then walks the same list and
+   * skips anything already CREATED — and even for a child whose status was lost mid-broadcast, the
+   * deployer looks its per-child creation id up in the registry before broadcasting anything. The
+   * payment is settled once, for the request; nothing on this path can charge again.
+   */
+  private async runGroupCreation(request: Awaited<ReturnType<CreationService['load']>>) {
+    const id = request.id;
+    const plan = this.groupPlan(request);
+    if (!request.approvedHash || request.approvedHash !== groupPlanHash(plan)) throw new WorkflowError('draft_not_approved');
+    const selected = request.children.filter(child => child.status !== 'SKIPPED').sort((a, b) => a.position - b.position);
+    if (selected.length === 0) throw new WorkflowError('import_selection_empty', 422);
+    let failed = 0, deployed = 0;
+    for (const child of selected) {
+      if (child.status === 'CREATED' && child.marketAddress) continue;
+      const draft = draftSchema.parse(child.draft);
+      await this.deps.db.creationChild.update({
+        where: { id: child.id }, data: { status: 'CREATING', attempts: { increment: 1 }, failureCode: null, failureDetail: null },
+      });
+      try {
+        const created = await this.deps.deployer!.create({
+          requestId: id, position: child.position, question: draft.question, rules: draft.rules,
+          evidenceSource: draft.evidenceSource, closeAt: Math.floor(new Date(draft.closeAt).getTime() / 1000),
+        });
+        await this.deps.db.$transaction(async tx => {
+          await tx.creationChild.update({
+            where: { id: child.id },
+            data: { status: 'CREATED', marketAddress: created.market, creationTxHash: created.transactionHash ?? child.creationTxHash, failureCode: null, failureDetail: null },
+          });
+          if (request.eventId) {
+            // Stored lower-cased, as every address in this schema is: the unique index on it and
+            // the lookup that finds a market's event both depend on one canonical form.
+            await tx.eventMarket.updateMany({
+              where: { eventId: request.eventId, position: child.position },
+              data: { marketAddress: created.market.toLowerCase() },
+            });
+          }
+        });
+        deployed++;
+      } catch (error) {
+        failed++;
+        const detail = error instanceof Error ? error.message.slice(0, 200) : 'creation_failed';
+        await this.deps.db.creationChild.update({
+          where: { id: child.id }, data: { status: 'FAILED', failureCode: 'creation_failed', failureDetail: detail },
+        });
+      }
+    }
+    if (failed > 0) {
+      await this.deps.db.creationRequest.update({
+        where: { id },
+        data: { status: 'FAILED', failureCode: 'group_partially_created',
+          failureDetail: `${failed} of ${selected.length} markets failed; the ${selected.length - failed} that exist are never recreated on retry.` },
+      });
+      // Thrown so the durable job retries with backoff, exactly as a standalone failure does.
+      // Every market already created stays created, and no payment is touched.
+      throw new WorkflowError('group_partially_created');
+    }
+    // `deployed` counts what this run broadcast; a replayed job for a complete group deploys
+    // nothing and simply confirms the request, which is what makes the job safe to redeliver.
+    void deployed;
+    return this.deps.db.$transaction(async tx => {
+      if (request.eventId) await tx.marketEvent.update({ where: { id: request.eventId }, data: { status: 'ACTIVE' } });
+      return tx.creationRequest.update({
+        where: { id }, data: { status: 'CREATED', failureCode: null, failureDetail: null }, include: REQUEST_INCLUDE,
+      });
+    });
   }
 }

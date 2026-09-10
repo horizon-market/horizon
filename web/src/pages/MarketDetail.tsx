@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, type MakerCurve, type Market, type Position, type Publication, type Quote } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import { api, ApiError, type MakerCurve, type Market, type MarketEventContext, type Position, type Publication } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
 import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
@@ -8,6 +8,7 @@ import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DE
 import { OrderBook } from '../components/OrderBook';
 import { CurveLiquidity } from '../components/CurveLiquidity';
 import { CurveOrder } from '../components/CurveOrder';
+import { MarketOrder, sideLabel, type Side } from '../components/MarketOrder';
 import { separate } from '../curve';
 import { approve, confirm, describeWalletError, send } from '../wallet';
 
@@ -36,15 +37,19 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
   const data = detail.data!.market;
+  const group = detail.data!.event;
   // The same split the API makes: fixed-price orders feed the ladder, curves feed the chart.
   const resting = separate(data.curves, isYes);
   const refresh = () => { detail.reload(); mine.reload(); };
   return (
     <div className="stack">
       <div className="row between">
-        <a href="#/">← All markets</a>
+        {/* A grouped market keeps its own address and its own page; the event is a way back to
+            the rest of the group, never a redirect away from a link somebody already holds. */}
+        <a href={group ? `#/events/${group.slug}` : '#/'}>← {group ? group.title : 'All markets'}</a>
         <button onClick={refresh}>Refresh</button>
       </div>
+      {group && <EventContext group={group} />}
       <Card>
         <div className="row between">
           <Badge kind={data.status === 'OPEN' ? 'open' : data.status === 'RESOLVED' ? 'resolved' : 'closed'}>
@@ -107,6 +112,44 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
 }
 
 /**
+ * The group this market belongs to, if any: which outcome it stands for, what the group's rule is,
+ * and where its definitions came from. Everything below it — prices, depth, collateral, resolution
+ * — remains this one market's own.
+ */
+function EventContext({ group }: { group: MarketEventContext }) {
+  const exclusive = group.exclusivity === 'EXCLUSIVE';
+  const siblings = group.siblings.filter(sibling => sibling.position !== group.position && sibling.marketAddress);
+  return (
+    <Card title={<>Part of <a href={`#/events/${group.slug}`}>{group.title}</a></>}
+      actions={<span className="badge closed">{group.outcomeLabel}</span>}>
+      <p className="small muted" style={{ marginTop: 0 }}>
+        <strong>{exclusive ? 'Exactly one outcome in this group is meant to win.' : 'Grouped for context only.'}</strong>{' '}
+        {group.exclusivityNote}
+      </p>
+      {!group.outcomesComplete && (
+        <Notice kind="warn">
+          The group does not cover every outcome, so the prices across it are not a complete distribution.
+        </Notice>
+      )}
+      {siblings.length > 0 && (
+        <div className="row" style={{ marginTop: 'var(--space-2)' }}>
+          {siblings.map(sibling => (
+            <a key={sibling.position} className="button" href={`#/markets/${sibling.marketAddress}`}>{sibling.outcomeLabel}</a>
+          ))}
+        </div>
+      )}
+      {group.source.provider !== 'horizon' && group.source.url && (
+        <p className="small muted" style={{ marginTop: 'var(--space-3)', marginBottom: 0 }}>
+          The definition of this market was imported from{' '}
+          <a href={group.source.url} target="_blank" rel="noreferrer noopener">{group.source.provider}</a>.
+          Its prices, depth and resolution here are Horizon's own; nothing about trading or settlement is shared with the source.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/**
  * The outcome the limit-order and curve cards are read through. It normally rides in the trade
  * ticket, which is also where a trader picks the outcome to trade; a closed market has no ticket,
  * so it renders this on its own rather than leaving the book stuck on YES.
@@ -120,10 +163,9 @@ function OutcomeChoice({ isYes, onOutcome }: { isYes: boolean; onOutcome: (value
   );
 }
 
-type Side = { isYes: boolean; isBuy: boolean };
 type OrderType = 'market' | 'limit' | 'curve';
 
-const label = (side: Side) => `${side.isBuy ? 'Buy' : 'Sell'} ${side.isYes ? 'YES' : 'NO'}`;
+const label = sideLabel;
 const TABS: { key: OrderType; label: string }[] = [
   { key: 'market', label: 'Market' }, { key: 'limit', label: 'Limit' }, { key: 'curve', label: 'Curve' },
 ];
@@ -233,130 +275,6 @@ function YourOrders({ orders, account, onDone }: { orders: MakerCurve[]; account
   );
 }
 
-/** Takes the best executable route now. The quote it shows is the one the wallet will sign. */
-function MarketOrder({ market, side, account, onDone, onSwitchToLimit }: {
-  market: string; side: Side; account?: string; onDone: () => void; onSwitchToLimit: () => void;
-}) {
-  const [size, setSize] = useState('1');
-  const [slippageBps, setSlippageBps] = useState(50);
-  const [quote, setQuote] = useState<Quote | undefined>();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<{ code: string; message: string } | undefined>();
-  const [tx, setTx] = useState<TxState>({ phase: 'idle' });
-  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
-  useEffect(() => { const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000); return () => clearInterval(timer); }, []);
-
-  const shareAmount = useMemo(() => {
-    try {
-      const value = parseUnits(size, USDC_DECIMALS);
-      return value < 1_000_000n ? { error: 'Minimum order size is 1 share.' } : { value };
-    } catch (issue) { return { error: issue instanceof Error ? issue.message : 'Invalid amount.' }; }
-  }, [size]);
-
-  // A market order prices itself as you type, the way an exchange ticket does. Each quote refreshes
-  // chain state and simulates the whole route, so requests are debounced and single-flight: while
-  // one is running the newest inputs wait for it, then supersede it. Firing on every keystroke
-  // would queue work the trader has already moved past and exhaust the service's own capacity.
-  const inFlight = useRef(false);
-  const wanted = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    setQuote(undefined); setError(undefined); setTx({ phase: 'idle' });
-    if (!account || shareAmount.error || !shareAmount.value) { wanted.current = undefined; return; }
-    const request = { market, account, recipient: account, isYes: side.isYes, isBuy: side.isBuy,
-      shares: shareAmount.value.toString(), slippageBps };
-    const key = JSON.stringify(request);
-    wanted.current = key;
-    setPending(true);
-    const run = async () => {
-      if (inFlight.current || wanted.current !== key) return;
-      inFlight.current = true;
-      try {
-        const result = await api.quote(request);
-        if (wanted.current === key) { setQuote(result); setPending(false); }
-      } catch (issue) {
-        if (wanted.current === key) {
-          setError(issue instanceof ApiError
-            ? { code: issue.code, message: describeQuoteError(issue.code) }
-            : { code: 'unknown', message: issue instanceof Error ? issue.message : 'Pricing failed.' });
-          setPending(false);
-        }
-      } finally {
-        inFlight.current = false;
-        if (wanted.current !== key) void run();
-      }
-    };
-    const timer = setTimeout(() => void run(), 700);
-    return () => clearTimeout(timer);
-  }, [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString()]);
-
-  const expired = quote ? quote.deadline <= now : false;
-  const busy = tx.phase === 'signing' || tx.phase === 'pending';
-
-  const run = async (action: 'approve' | 'execute') => {
-    if (!account || !quote) return;
-    setTx({ phase: 'signing' });
-    try {
-      const hash = action === 'approve'
-        ? await approve(account, quote.approval.token, quote.approval.spender, quote.approval.amount)
-        : await send(account, quote.transaction);
-      setTx({ phase: 'pending', hash });
-      const status = await confirm(account, hash);
-      if (status !== 'success') { setTx({ phase: 'error', hash, message: 'The transaction reverted. Prices moved; try again.' }); return; }
-      setTx({ phase: 'confirmed', hash });
-      if (action === 'execute') onDone();
-    } catch (issue) { setTx({ phase: 'error', message: describeWalletError(issue) }); }
-  };
-
-  return (
-    <div className="stack">
-      <div className="field" style={{ marginBottom: 0 }}>
-        <label htmlFor="size">Amount (shares)</label>
-        <input id="size" inputMode="decimal" value={size} onChange={event => setSize(event.target.value)} />
-        {shareAmount.error ? <div className="error">{shareAmount.error}</div>
-          : <div className="hint">One share pays 1 USDC if {side.isYes ? 'YES' : 'NO'} wins.</div>}
-      </div>
-      <details className="small">
-        <summary className="muted">Slippage tolerance: {slippageBps / 100}%</summary>
-        <select value={slippageBps} onChange={event => setSlippageBps(Number(event.target.value))} style={{ marginTop: '.35rem' }}>
-          {[10, 50, 100, 300].map(value => <option key={value} value={value}>{value / 100}%</option>)}
-        </select>
-      </details>
-
-      {!account && <Notice kind="info">Connect a wallet to price this order against your balances.</Notice>}
-      {account && pending && <p className="small muted">Pricing…</p>}
-      {quote && (
-        <>
-          <dl className="kv total">
-            <dt>{side.isBuy ? 'Estimated cost' : 'Estimated proceeds'}</dt><dd><strong>{usdc(quote.usdc)}</strong></dd>
-            <dt>Average price</dt><dd>{priceUsdc(Number(BigInt(quote.usdc) * 1_000_000n / BigInt(quote.shares)))}</dd>
-            <dt>{side.isBuy ? 'Maximum cost' : 'Minimum proceeds'}</dt><dd>{usdc(quote.limit)}</dd>
-            <dt>Fees</dt><dd>0% — no maker, taker, routing or protocol fee</dd>
-            <dt>Filled from</dt><dd>{quote.legs.length} order{quote.legs.length === 1 ? '' : 's'}, settled atomically</dd>
-          </dl>
-          {expired
-            ? <Notice kind="warn">This price expired. Change the amount to refresh it.</Notice>
-            : <p className="small muted">Price held for {Math.max(0, quote.deadline - now)}s and enforced on chain.</p>}
-          {quote.simulation === 'insufficient_balance' && (
-            <Notice kind="warn">Not enough {side.isBuy ? 'test USDC' : `${side.isYes ? 'YES' : 'NO'} tokens`} in this wallet for that size.</Notice>
-          )}
-        </>
-      )}
-      {error && (error.code === 'quote_unavailable_refresh_or_check_liquidity'
-        ? <NoLiquidity side={side} onSwitchToLimit={onSwitchToLimit} />
-        : <Notice kind="error">{error.message}</Notice>)}
-      <TransactionState state={tx} />
-      {quote?.simulation === 'approval_required'
-        ? <button className="primary wide" disabled={busy || expired} onClick={() => void run('approve')}>
-            Approve {side.isBuy ? 'USDC' : 'outcome tokens'}
-          </button>
-        : <button className={`wide ${side.isBuy ? 'yes' : 'no'}`} disabled={busy || expired || quote?.simulation !== 'passed'}
-            onClick={() => void run('execute')}>
-            {label(side)}
-          </button>}
-    </div>
-  );
-}
-
 /** Rests at the maker's own price. This is a curve with equal endpoints, published through Aqua. */
 function LimitOrder({ market, side, account, book, onDone }: {
   market: string; side: Side; account?: string; book: { ask: number | null; bid: number | null }; onDone: () => void;
@@ -449,23 +367,3 @@ function LimitOrder({ market, side, account, book, onDone }: {
   );
 }
 
-/**
- * An empty book is a normal state on a young market. The useful next step is to become the maker,
- * so the invitation switches the ticket rather than sending the trader somewhere else.
- */
-function NoLiquidity({ side, onSwitchToLimit }: { side: Side; onSwitchToLimit: () => void }) {
-  return (
-    <Notice kind="warn">
-      <p style={{ margin: '0 0 .5rem' }}>
-        Nobody is {side.isBuy ? 'offering' : 'bidding for'} {side.isYes ? 'YES' : 'NO'} at that size right now, so a market order cannot fill.
-        Place a limit order at your own price and wait to be filled.
-      </p>
-      <button onClick={onSwitchToLimit}>Switch to a limit order</button>
-    </Notice>
-  );
-}
-
-function describeQuoteError(code: string): string {
-  if (code === 'quote_capacity') return 'The pricing service is busy. Try again in a moment.';
-  return code.replace(/_/g, ' ');
-}

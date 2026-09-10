@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, type Market } from '../api';
+import { api, type HorizonEvent, type Market } from '../api';
 import { useAsync } from '../hooks';
 import { Badge, Empty, ErrorBox, Loading, ZeroFee } from '../components/Ui';
 import { dateTime, price, shares, timeLeft, usdc } from '../format';
@@ -7,13 +7,34 @@ import { dateTime, price, shares, timeLeft, usdc } from '../format';
 const STATUS: Record<Market['status'], 'open' | 'closed' | 'resolved'> = { OPEN: 'open', CLOSED: 'closed', RESOLVED: 'resolved' };
 const RESULTS = ['Unresolved', 'YES', 'NO', 'INVALID'];
 
+type Filter = 'all' | 'open' | 'closed';
+/** One browsable thing: a standalone market, or an event standing for its children. */
+type Entry = { key: string; createdAt: number; open: boolean } & (
+  | { kind: 'market'; market: Market }
+  | { kind: 'event'; event: HorizonEvent }
+);
+
 export function Markets() {
   const listing = useAsync(() => api.markets(), []);
-  const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const [filter, setFilter] = useState<Filter>('all');
   if (listing.loading) return <Loading rows={6} label="Loading markets" />;
   if (listing.error) return <ErrorBox error={listing.error} retry={listing.reload} />;
   const data = listing.data!;
-  const visible = data.markets.filter(market => filter === 'all' || (filter === 'open' ? market.status === 'OPEN' : market.status !== 'OPEN'));
+  const events = data.events ?? [];
+  // A child is drawn inside its event's card and nowhere else, so nothing appears twice.
+  const grouped = new Set(events.flatMap(event => event.children.map(child => child.marketAddress?.toLowerCase()).filter(Boolean) as string[]));
+  const entries: Entry[] = [
+    ...data.markets.filter(market => !grouped.has(market.id.toLowerCase())).map(market => ({
+      kind: 'market' as const, key: market.id, market, createdAt: market.createdAt, open: market.status === 'OPEN',
+    })),
+    ...events.map(event => ({
+      kind: 'event' as const, key: event.id, event,
+      createdAt: Math.max(0, ...event.children.map(child => child.market?.createdAt ?? 0)),
+      open: event.stats.open > 0,
+    })),
+  ].sort((left, right) => right.createdAt - left.createdAt);
+  const visible = entries.filter(entry => filter === 'all' || (filter === 'open' ? entry.open : !entry.open));
+
   return (
     <div className="stack">
       <ZeroFee />
@@ -31,12 +52,17 @@ export function Markets() {
       <p className="small muted">
         Discovery reads The Graph at indexed block {data.indexedBlock}. Prices and depth below are indexed estimates;
         every order is re-checked and simulated against live chain state before you sign.
+        {events.length > 0 && ' Grouped events show their outcomes together; each one is a separate market you can open on its own.'}
       </p>
       {visible.length === 0
-        ? <Empty title={data.markets.length === 0 ? 'No markets are indexed yet' : 'No markets match this filter'}>
+        ? <Empty title={entries.length === 0 ? 'No markets are indexed yet' : 'Nothing matches this filter'}>
             <p>Create the first one from the <a href="#/create">Create market</a> page.</p>
           </Empty>
-        : <div className="grid">{visible.map(market => <MarketCard key={market.id} market={market} />)}</div>}
+        : <div className="grid">
+            {visible.map(entry => entry.kind === 'event'
+              ? <EventCard key={entry.key} event={entry.event} />
+              : <MarketCard key={entry.key} market={entry.market} />)}
+          </div>}
     </div>
   );
 }
@@ -67,6 +93,50 @@ function MarketCard({ market }: { market: Market }) {
       <div className="row between small muted">
         <span>{market.liquidity.curves} live curve{market.liquidity.curves === 1 ? '' : 's'}</span>
         <span>{usdc(market.collateral)} collateral</span>
+      </div>
+    </a>
+  );
+}
+
+/**
+ * One card for an event, with a row per outcome. The rows carry Horizon's own YES price for that
+ * outcome and nothing else: these are independent markets, so their prices are not a distribution
+ * and are never presented as one.
+ */
+function EventCard({ event }: { event: HorizonEvent }) {
+  const shown = event.children.slice(0, 4);
+  const hidden = event.children.length - shown.length;
+  return (
+    <a className="card event-card" href={`#/events/${event.slug}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+      <div className="row between">
+        <div className="row">
+          <Badge kind={event.stats.open > 0 ? 'open' : 'closed'}>
+            {event.stats.live} market{event.stats.live === 1 ? '' : 's'}
+          </Badge>
+          {event.exclusivity === 'EXCLUSIVE' && <span className="badge warn" title={event.exclusivityNote}>One winner</span>}
+        </div>
+        <span className="small muted">
+          {event.source.provider === 'horizon' ? event.category || 'Event' : `via ${event.source.provider}`}
+        </span>
+      </div>
+      <h3 style={{ marginTop: '.6rem' }}>{event.title}</h3>
+      <ul className="event-outcomes">
+        {shown.map(child => (
+          <li key={child.position}>
+            <span className="event-outcome-name">{child.outcomeLabel}</span>
+            {child.market
+              ? <>
+                  <span className="event-outcome-price">{price(child.market.liquidity.yes.ask)}</span>
+                  <span className="small muted">{child.market.status === 'RESOLVED' ? RESULTS[child.market.result] : child.market.status.toLowerCase()}</span>
+                </>
+              : <span className="small muted">not deployed</span>}
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && <p className="small muted" style={{ margin: 0 }}>and {hidden} more outcome{hidden === 1 ? '' : 's'}</p>}
+      <div className="row between small muted" style={{ marginTop: 'var(--space-2)' }}>
+        <span>{event.outcomesComplete ? 'All source outcomes included' : 'A selection of outcomes, not the full set'}</span>
+        <span>{usdc(event.stats.collateral)} collateral</span>
       </div>
     </a>
   );

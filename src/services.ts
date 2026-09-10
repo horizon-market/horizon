@@ -8,6 +8,7 @@ import { createFacilitator } from './payments/x402.js';
 import { CreationService, WorkflowError } from './creation/service.js';
 import { RegistryMarketDeployer } from './creation/onchain.js';
 import { AdminService, ChainResolutionSubmitter } from './admin/service.js';
+import { EventService } from './events/service.js';
 
 export type QueueBindings = { enqueueCreation?: (requestId: string) => Promise<void>; enqueueResolution?: (resolutionId: string) => Promise<void> };
 
@@ -21,9 +22,10 @@ export function buildServices(config: Config, db: PrismaClient, queue: QueueBind
   const facilitator = createFacilitator(config.payments);
   const deployer = config.creation ? new RegistryMarketDeployer(config.creation) : undefined;
   const submitter = config.creation ? new ChainResolutionSubmitter(config.creation) : undefined;
+  const events = new EventService(db);
   const creation = new CreationService({
     db, provider, verifier, facilitator, payments: config.payments, world: config.world, deployer,
-    enqueue: queue.enqueueCreation,
+    imports: config.imports, enqueue: queue.enqueueCreation,
     closeBounds: { minSeconds: config.creation?.minCloseInSeconds ?? 3600, maxSeconds: config.creation?.maxCloseInSeconds ?? 365 * 24 * 3600 },
     // Drafting is grounded on live indexed markets; an indexer outage is reported, never assumed empty.
     context: async () => {
@@ -35,12 +37,12 @@ export function buildServices(config: Config, db: PrismaClient, queue: QueueBind
       } catch { throw new WorkflowError('market_context_unavailable', 503); }
     },
   });
-  const admin = new AdminService({ db, markets, submitter, enqueueCreation: queue.enqueueCreation, enqueueResolution: queue.enqueueResolution });
+  const admin = new AdminService({ db, markets, submitter, events, enqueueCreation: queue.enqueueCreation, enqueueResolution: queue.enqueueResolution });
   // Bound to the worker's sync job. The API process builds it too but never calls it.
   const syncProjection = markets && config.marketSync.enabled
     ? () => syncMarkets(db, markets.graph, { pageSize: config.marketSync.pageSize })
     : undefined;
-  return { markets, creation, admin, provider, verifier, facilitator, deployer, submitter, projection, syncProjection };
+  return { markets, creation, admin, events, provider, verifier, facilitator, deployer, submitter, projection, syncProjection };
 }
 
 export function publicConfig(config: Config, services: ReturnType<typeof buildServices>) {
@@ -64,6 +66,19 @@ export function publicConfig(config: Config, services: ReturnType<typeof buildSe
       access: config.world.access, reason: services.verifier.reason, action: config.world.action, appId: config.world.appId,
       rpId: config.world.rpId, environment: config.world.environment },
     resolution: { centralized: true, disclosed: true, resolver: services.submitter?.resolver ?? null,
-      invalidPayout: '0.5 USDC per outcome token', note: 'A disclosed Horizon admin resolves markets to YES, NO or INVALID with an evidence reference.' },
+      invalidPayout: '0.5 USDC per outcome token', note: 'A disclosed Horizon admin resolves markets to YES, NO or INVALID with an evidence reference.',
+      // Stated where the application can read it, so no screen can imply a stronger guarantee.
+      groupConsistency: 'backend_only',
+      groupConsistencyNote: 'An event marked as exclusive is checked in the resolution workflow: a second YES is refused while a sibling is resolved YES or queued to be. '
+        + 'The market contracts know nothing about events, so this is not enforced on chain.' },
+    events: {
+      // Grouping is service metadata. Every child is an independent binary market with its own
+      // contracts, collateral and resolution; shared collateral and negative-risk conversion
+      // between siblings are deliberately not implemented.
+      available: true, sharedCollateral: false, negativeRiskConversion: false,
+      imports: { available: config.imports.enabled, providers: config.imports.enabled ? ['polymarket'] : [],
+        maxChildren: config.imports.maxChildren, policy: 'definitions_only',
+        note: 'Imports copy definitions only: question, outcome labels, resolution criteria, evidence source and dates. Source prices, liquidity, volume and settlement never become Horizon data.' },
+    },
   };
 }

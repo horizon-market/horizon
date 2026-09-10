@@ -1,0 +1,32 @@
+{
+  "id": "990002",
+  "ticker": "horizon-import-closed-event",
+  "slug": "horizon-import-closed-event",
+  "title": "Settled synthetic event",
+  "description": "A synthetic Gamma event that has already closed on the source. None of its markets can be opened for trading on Horizon.",
+  "startDate": "2026-01-01T00:00:00Z",
+  "endDate": "2026-02-01T00:00:00Z",
+  "closedTime": "2026-02-01T12:00:00Z",
+  "active": false,
+  "closed": true,
+  "archived": false,
+  "negRisk": true,
+  "enableNegRisk": true,
+  "tags": [{ "id": "9", "label": "Testing", "slug": "testing" }],
+  "markets": [
+    {
+      "id": "990201",
+      "question": "Will the synthetic settled question have resolved YES?",
+      "conditionId": "0x6666666666666666666666666666666666666666666666666666666666666666",
+      "slug": "synthetic-settled-child",
+      "description": "Resolves YES if the stated condition held before the close time, and NO otherwise. The event it belongs to has already settled.",
+      "outcomes": "[\"Yes\", \"No\"]",
+      "outcomePrices": "[\"1\", \"0\"]",
+      "groupItemTitle": "Settled outcome",
+      "endDate": "2026-02-01T00:00:00Z",
+      "active": false,
+      "closed": true,
+      "archived": false
+    }
+  ]
+}

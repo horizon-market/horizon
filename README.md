@@ -21,6 +21,28 @@ Useful continuation prompt:
 
 > Read /Users/xana/work/ethglobal2026/horizon/README.md, PROJECT_BRIEF.md, OPERATIONS.md, PHASE2.md, and contracts/README.md. Continue Horizon from this context rather than restarting product discovery. Phase 2 is live on Sepolia with a deployed Subgraph, exact integer curve math, atomic routes, and a Graph-backed quote API. Continue Phase 3: React trading/creation UI, Graph-grounded AI, browser and agent Hedera x402 payments, World verification/discounts, and admin resolution. Preserve zero trading fees, USDC-only sharing, market-specific outcomes, and explicit resale authorization. Read deployments/*.json for public transaction evidence and check existing local credentials without printing them.
 
+## Events: grouped markets and imported definitions
+
+Added after Phase 4. An **event** groups several independent binary markets — "Barcelona wins",
+"Real Madrid wins", "Draw" — under one title, one review and one payment. Every child keeps its own
+market contract, collateral, trading and resolution; standalone markets and their URLs are
+unchanged. Being in an event says nothing about the outcomes unless the event is marked as
+exclusive, and even then the "exactly one winner" rule is checked by Horizon's resolution workflow
+only — the market contracts hold no notion of a group. Shared collateral and negative-risk token
+conversion between siblings are deliberately **not implemented**.
+
+Events can be authored on Horizon or imported from a Polymarket event or market page. An import
+copies **definitions only** — question, outcome labels and order, resolution criteria, evidence
+source and dates — through the backend from a fixed Polymarket API origin. Source prices,
+liquidity, volume and settlement never become Horizon data, and settlement is never delegated:
+the disclosed Horizon resolver still decides. A preview shows exactly what would be created, and
+what is refused and why, before anything is approved or charged. A group is priced per market at
+the standalone price, and approval binds to the whole plan, so changing the selection reprices it
+and invalidates the approval.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the model, the import rules and the
+enforcement boundary, and [OPERATIONS.md](OPERATIONS.md) for the migration and settings.
+
 ## Confirmed product choices
 
 - Build **Horizon as a separate project**. The neighboring ArcBook project is from an earlier event and may inform the design; it is not the Horizon codebase.

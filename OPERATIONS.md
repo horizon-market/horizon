@@ -100,6 +100,76 @@ For a pre-existing Docker volume created before the initialization SQL was added
 
 Verified locally: TypeScript typecheck/build; **8 unit tests**; **3 PostgreSQL integration tests** covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry; **39 Foundry tests** including three 256-case fuzz properties; and **1 isolated Anvil integration test** with 44 contract/TypeScript pricing comparisons, whole-route simulation and execution, exhaustion, and reorg checks. The Subgraph builds and is live; a real Graph-backed route executed two Sepolia fills, and Graph indexed the resulting collateral and exhausted curves. The 329 vendor file hashes remain unchanged. Remote CI is configured but has not run.
 
+### Events, groups and Polymarket imports
+
+Grouped events are service metadata over the existing markets, so they need a migration and two
+optional settings, and nothing else:
+
+```sh
+npm run db:migrate          # applies 202609100002_market_events
+npm run db:test:migrate     # the same, against horizon_test
+```
+
+The migration is additive and backward compatible. `CreationRequest.kind` defaults to `SINGLE` and
+`eventId` stays `NULL`, so every request made before this change keeps its exact previous
+behaviour, every existing market stays standalone with its existing URL, and standalone creation
+and trading are unchanged.
+
+Settings, all optional and defaulted in `.env.example`:
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `IMPORTS_ENABLED` | `true` | Set to `false` to remove the import option and refuse the import routes with `imports_not_configured`. |
+| `POLYMARKET_API_ORIGIN` | `https://gamma-api.polymarket.com` | The only origin the backend fetches source definitions from. Point it at a local stub in tests; it must be https otherwise. |
+| `IMPORT_MAX_CHILDREN` | `24` | Upper bound on children per event, which also bounds what one creation request can cost. |
+
+Verified locally on 2026-09-10 against the live Gamma API: `POST /api/creation/imports/preview`
+with `https://polymarket.com/event/fed-decision-in-september-762` returned five YES/NO children
+under one negative-risk (exclusive) event, priced at five creation charges, with no row written.
+
+**Do not run the creation step against a configured deployer key unless you intend to create real
+markets.** The creation job broadcasts to the registry as soon as a payment is settled, including
+in `HEDERA_PAYMENT_MODE=simulated`, which simulates the *payment* only. To exercise the workflow
+without deploying, run the API with `EVM_DEPLOYER_PRIVATE_KEY` genuinely unset — check with
+`node --import tsx -e "import {loadConfig} from './src/config.js'; console.log(Boolean(loadConfig().creation?.privateKey))"`
+rather than assuming a filtered `.env` dropped it.
+
+### Void a market that should not exist
+
+A market created in error is voided by resolving it **INVALID** through the ordinary audited
+workflow. INVALID is the disclosed result for a question Horizon will not settle: it pays 0.5 USDC
+per outcome token, so a holder of a full YES/NO pair is made whole and a one-sided holder gets half
+back. On a market holding no collateral it moves nothing.
+
+```sh
+npm run resolve:invalid -- --dry-run 0xMarket            # check only; never broadcasts
+npm run resolve:invalid -- --reason "…" 0xMarket 0xMarket
+```
+
+`BinaryMarket.resolve` calls `close()`, which reverts with `MarketNotClosed` before the market's
+close timestamp, so the script refuses to run early and prints exactly when each market becomes
+resolvable instead of broadcasting a transaction that would revert. It is safe to run repeatedly:
+an already resolved market is reported and skipped, and the submitter re-reads the on-chain result
+before every broadcast. It needs `EVM_DEPLOYER_PRIVATE_KEY`, because only the disclosed resolver
+key can resolve.
+
+**Outstanding, created in error on 2026-09-10.** Four markets were created on Sepolia while the
+group creation flow was being exercised locally: the run was intended to have no deployer key, but
+the key was passed through by a mistaken `.env` filter, and `HEDERA_PAYMENT_MODE=simulated`
+simulates the *payment* only — the creation job still broadcasts. They hold no collateral and are
+to be resolved INVALID once they close at **2026-09-16T00:00:00Z**:
+
+```sh
+npm run resolve:invalid -- \
+  --reason "Created in error while exercising the event creation flow; never intended for trading. Voided by the disclosed Horizon resolver." \
+  0x1d65EcCCD938718ff3e6f508BF31CBAd845444F6 \
+  0xfa138ecbbe0C4Ebe0c1245e0153dFEEF418aC701 \
+  0xD8a3b11Ed177207C9ac349Ce904Ed3f92e6Ee012 \
+  0x84d7f592933bB8b70eB5c03321A7014F010729d1
+```
+
+They are open and tradeable until then and cannot be closed early; the contract has no such path.
+
 ### Run the Phase 1 contract demo
 
 From the Horizon root, with Foundry 1.2.3 installed:

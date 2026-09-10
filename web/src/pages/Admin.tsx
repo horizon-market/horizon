@@ -89,6 +89,41 @@ function Panel({ email, onSignOut }: { email: string; onSignOut: () => void }) {
         Resolution is centralized and disclosed. The resolver key is {data.resolverModel.resolver ? <Address value={data.resolverModel.resolver} /> : 'not configured'}.
         Payouts: YES {data.resolverModel.payouts.YES}; NO {data.resolverModel.payouts.NO}; INVALID {data.resolverModel.payouts.INVALID}.
       </Notice>
+      {/* Stated on the screen that resolves markets, because this is where the limit matters. */}
+      <Notice kind="warn">
+        <strong>Group consistency is enforced here only.</strong> {data.resolverModel.groupConsistency.note}
+      </Notice>
+
+      {data.events.length > 0 && (
+        <Card title={`Events (${data.events.length})`}>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Each child below is an independent market with its own collateral. Grouping is Horizon's own metadata; the market
+            contracts know nothing about it.
+          </p>
+          <div className="scroll">
+            <table>
+              <thead><tr><th>Event</th><th>Rule</th><th>Source</th><th>Markets</th><th>Outcomes</th></tr></thead>
+              <tbody>
+                {data.events.map(event => (
+                  <tr key={event.id}>
+                    <td><a href={`#/events/${event.slug}`}>{event.title}</a><div className="small muted mono">{event.slug}</div></td>
+                    <td className="small">
+                      {event.exclusivity === 'EXCLUSIVE' ? 'Exactly one winner' : 'Collection'}
+                      <div className="muted">{event.exclusivityEnforcement === 'backend_only' ? 'checked in this workflow only' : 'no rule'}</div>
+                    </td>
+                    <td className="small">
+                      {event.source.provider}
+                      {event.source.url && <div className="muted"><a href={event.source.url} target="_blank" rel="noreferrer noopener">source page</a></div>}
+                    </td>
+                    <td className="small">{event.stats.live} live<div className="muted">{event.stats.resolved} resolved</div></td>
+                    <td className="small">{event.outcomesComplete ? 'complete set' : 'partial set'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       <Card title={`Markets${market ? ' (filtered)' : ''}`}>
         {data.marketsError

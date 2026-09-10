@@ -5,6 +5,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { CreationConfig } from '../config.js';
 import { marketAbi } from '../trading/abi.js';
 import { MarketService } from '../trading/markets.js';
+import { EventService } from '../events/service.js';
 import { WorkflowError } from '../creation/service.js';
 
 export const RESOLUTIONS = { YES: 1, NO: 2, INVALID: 3 } as const;
@@ -44,7 +45,7 @@ export class ChainResolutionSubmitter implements ResolutionSubmitter {
 }
 
 export type AdminDependencies = {
-  db: PrismaClient; markets?: MarketService; submitter?: ResolutionSubmitter;
+  db: PrismaClient; markets?: MarketService; submitter?: ResolutionSubmitter; events?: EventService;
   enqueueCreation?: (requestId: string) => Promise<void>;
   enqueueResolution?: (resolutionId: string) => Promise<void>;
 };
@@ -66,9 +67,11 @@ export class AdminService {
       db.creationRequest.groupBy({ by: ['status'], _count: { _all: true } }),
     ]);
     let markets: unknown[] = [], awaitingResolution: unknown[] = [], marketsError: string | undefined;
+    let events: unknown[] = [];
     if (this.deps.markets) {
       try {
         const listed = await this.deps.markets.list();
+        events = this.deps.events ? await this.deps.events.list(listed.markets).catch(() => []) : [];
         const now = Math.floor(Date.now() / 1000);
         // Every market is listed so an operator can inspect and resolve any of them. The market
         // contract refuses resolution before its close timestamp, so that is reported per row.
@@ -92,8 +95,13 @@ export class AdminService {
         attempts: request.attempts, createdAt: request.createdAt,
         verified: Boolean(request.verification), paymentStatus: request.payment?.status ?? null,
       })),
-      payments, resolutions, jobs, markets, awaitingResolution, marketsError,
-      resolverModel: { centralized: true, disclosed: true, resolver: this.deps.submitter?.resolver ?? null, payouts: PAYOUTS },
+      payments, resolutions, jobs, markets, awaitingResolution, marketsError, events,
+      resolverModel: { centralized: true, disclosed: true, resolver: this.deps.submitter?.resolver ?? null, payouts: PAYOUTS,
+        groupConsistency: {
+          enforcement: 'backend_only',
+          note: 'For an event marked as exclusive, this workflow refuses a second YES while a sibling is resolved YES or has a YES resolution queued. '
+            + 'The market contracts hold no notion of a group and do not enforce it, so the guarantee holds only for resolutions made through this workflow.',
+        } },
     };
   }
 
@@ -149,6 +157,36 @@ export class AdminService {
       fees: { maker: 0, taker: 0, routing: 0, protocol: 0 } };
   }
 
+  /**
+   * Refuses a resolution that would contradict an already decided sibling in an explicitly
+   * exclusive group. Exactly one child of such a group is meant to resolve YES, so a second YES
+   * is refused while the first stands, including one that is only queued.
+   *
+   * This is a backend check and nothing more. Each child is an independent market contract with
+   * its own collateral, and no contract knows the group exists — so a resolver key used outside
+   * this workflow could still produce two YES results on chain. INVALID and NO are never blocked:
+   * a cancelled or void underlying event has to be settleable across the whole group.
+   */
+  private async assertGroupConsistency(market: Address, result: ResolutionResult) {
+    if (!this.deps.events) return null;
+    const membership = await this.deps.events.forMarket(market);
+    if (!membership) return null;
+    const event = membership.event;
+    if (event.exclusivity !== 'EXCLUSIVE' || result !== 'YES') return event.id;
+    const { members, pending } = await this.deps.events.siblings(event.id, market);
+    const queued = pending.find(record => record.result === 'YES');
+    if (queued) throw new WorkflowError('exclusive_group_winner_pending', 409);
+    if (this.deps.markets) {
+      for (const sibling of members) {
+        const detail = await this.deps.markets.detail(sibling.marketAddress as Address).catch(() => null);
+        // A sibling already resolved YES means this group has its winner; a second one would
+        // contradict the rule the event was imported or authored under.
+        if (detail?.market.result === RESOLUTIONS.YES) throw new WorkflowError('exclusive_group_already_resolved', 409);
+      }
+    }
+    return event.id;
+  }
+
   async requestResolution(actor: string, market: Address, result: ResolutionResult, evidence: string) {
     // Refuse before the market's own close time rather than queueing a job the contract rejects.
     if (this.deps.markets) {
@@ -156,9 +194,10 @@ export class AdminService {
       if (detail.market.result !== 0) throw new WorkflowError('market_already_resolved');
       if (detail.market.status === 'OPEN') throw new WorkflowError('market_not_closed_yet', 422);
     }
+    const eventId = await this.assertGroupConsistency(market, result);
     const record = await this.deps.db.marketResolution.upsert({
       where: { market: market.toLowerCase() },
-      create: { market: market.toLowerCase(), result, evidence, requestedBy: actor, status: 'PENDING' },
+      create: { market: market.toLowerCase(), result, evidence, requestedBy: actor, status: 'PENDING', eventId },
       update: {},
     });
     if (record.status === 'SUBMITTED') throw new WorkflowError('market_already_resolved');

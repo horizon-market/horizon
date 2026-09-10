@@ -14,6 +14,7 @@ import { verifyPassword } from './password.js';
 import { tradingRoutes } from './trading/http.js';
 import { creationRoutes } from './creation/http.js';
 import { adminRoutes } from './admin/http.js';
+import { eventRoutes } from './events/http.js';
 import { buildServices, publicConfig, type QueueBindings } from './services.js';
 
 AdminJS.registerAdapter({ Database, Resource });
@@ -56,7 +57,8 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
   app.use('/api/creation', creationRoutes(services.creation));
   app.get('/api/config', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }),
     (_req, res) => res.json(publicConfig(config, services)));
-  app.use('/api', tradingRoutes(config.trading, services.markets));
+  app.use('/api', eventRoutes(services.events, services.markets));
+  app.use('/api', tradingRoutes(config.trading, services.markets, services.events));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok', service: 'horizon-api' }));
   app.get('/health/ready', async (_req, res) => {
     try {
@@ -72,8 +74,11 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
     // Served from web/dist by this process, so the panel carries the same brand as the app.
     branding: { companyName: 'Horizon', withMadeWithLove: false, logo: '/brand/brandmark.svg', favicon: '/favicon.ico' },
     resources: [
-      ...['CreationRequest', 'PaymentIntent', 'HumanVerification', 'DiscountUsage', 'MarketResolution', 'AdminAudit', 'JobRun']
+      ...['CreationRequest', 'CreationChild', 'PaymentIntent', 'HumanVerification', 'DiscountUsage', 'MarketResolution', 'AdminAudit', 'JobRun']
         .map(name => [name, 'Operations'] as const),
+      // Grouping metadata. Kept apart from the market mirror below: an event is Horizon's own
+      // record, while the mirror is a projection of chain state.
+      ...['MarketEvent', 'EventMarket'].map(name => [name, 'Events'] as const),
       // Derived rows, grouped apart so an operator never mistakes the mirror for the source of truth.
       ...['MarketProjection', 'CurveProjection', 'SyncCheckpoint'].map(name => [name, 'Market mirror (read model)'] as const),
     ].map(([name, group]) => ({

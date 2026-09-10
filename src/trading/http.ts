@@ -5,6 +5,7 @@ import type { Address, Hex } from 'viem';
 import { QuoteService, type TradingConfig } from './service.js';
 import { MarketService, MarketError } from './markets.js';
 import { GraphError } from './graph.js';
+import type { EventService } from '../events/service.js';
 
 export const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/).transform(v => v as Address);
 const hash = z.string().regex(/^0x[0-9a-fA-F]{64}$/).transform(v => v as Hex);
@@ -23,7 +24,7 @@ const redeemSchema = z.object({ account: address, market: address, recipient: ad
 export const serialize = (value: unknown) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item));
 
 /** `service` is the wired MarketService, which knows whether a local mirror is available. */
-export function tradingRoutes(config?: TradingConfig, marketService?: MarketService) {
+export function tradingRoutes(config?: TradingConfig, marketService?: MarketService, events?: EventService) {
   const router = Router();
   const service = config ? new QuoteService(config) : undefined;
   const markets = marketService ?? (config ? new MarketService(config) : undefined);
@@ -48,14 +49,40 @@ export function tradingRoutes(config?: TradingConfig, marketService?: MarketServ
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     try {
       const [list, sync] = await Promise.all([markets.list(), markets.syncStatus()]);
-      res.json(serialize({ ...list, sync }));
+      // Grouped markets travel with their event so browsing can draw one card per event and no
+      // child twice. `markets` still carries every market, so a client that ignores `events`
+      // keeps working exactly as before.
+      const grouped = events ? await events.list(list.markets).catch(() => []) : [];
+      const inGroup = new Set(grouped.flatMap(event => event.children.map(child => child.marketAddress?.toLowerCase())).filter(Boolean) as string[]);
+      res.json(serialize({
+        ...list, sync, events: grouped,
+        standalone: list.markets.filter(market => !inGroup.has(market.id.toLowerCase())).map(market => market.id),
+      }));
     } catch { res.status(503).json({ error: 'graph_unavailable' }); }
   });
   router.get('/markets/:market', reads, async (req, res) => {
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     const market = address.safeParse(req.params.market);
     if (!market.success) { res.status(400).json({ error: 'invalid_market' }); return; }
-    await guard(res, () => markets.detail(market.data));
+    // The market page keeps its own URL and its own trading; the event, when there is one, is
+    // context beside it — never a redirect away from a link somebody already holds.
+    await guard(res, async () => {
+      const detail = await markets.detail(market.data);
+      const membership = events ? await events.forMarket(market.data).catch(() => null) : null;
+      return {
+        ...detail,
+        event: membership ? {
+          slug: membership.event.slug, title: membership.event.title, exclusivity: membership.event.exclusivity,
+          exclusivityNote: membership.event.exclusivityNote, outcomesComplete: membership.event.outcomesComplete,
+          exclusivityEnforcement: membership.event.exclusivity === 'EXCLUSIVE' ? 'backend_only' : 'none',
+          source: { provider: membership.event.sourceProvider, url: membership.event.sourceUrl, importedAt: membership.event.importedAt },
+          outcomeLabel: membership.member.outcomeLabel, position: membership.member.position,
+          siblings: membership.event.members.map(member => ({
+            position: member.position, outcomeLabel: member.outcomeLabel, marketAddress: member.marketAddress,
+          })),
+        } : null,
+      };
+    });
   });
   router.get('/positions/:account', reads, async (req, res) => {
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
