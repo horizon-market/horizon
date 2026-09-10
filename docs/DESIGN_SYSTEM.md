@@ -214,6 +214,42 @@ which keeps state colour consistent with the rest of the app:
 | Filled | `resolved` | Order completely filled |
 | Closed | `closed` | Order cancelled, or its market closed |
 
+## Curve editor components
+
+The curve editor is one component reused by the trade ticket's **Curve** tab and by the `#/curves`
+explainer. It is deliberately free of wallet, market and API access, which is what lets the
+explainer render outside the API config gate the way `#/design` does.
+
+- **`CurveChart`** — one chart, two modes. Without `onChange` it is a read-only picture and its
+  `<svg>` keeps `role="img"`. With `onChange` it becomes an editor: `role` changes to `group` so
+  the controls inside it are reachable, the two endpoints become `role="slider"` handles, and the
+  dashed shapes it already drew become clickable switches. `caption={false}` drops the built-in
+  sentence where several charts sit together and would otherwise repeat it verbatim.
+- **`.chart-handle` / `.chart-hit`** — the visible 4-unit dot and the 11-unit invisible target
+  behind it. Only the hit shapes take pointer events; the crosshair, gridlines and labels are
+  explicitly `pointer-events: none`, because the crosshair tracks the pointer and would otherwise
+  swallow every press aimed at the handle it is sitting on.
+- **`.chart-summary`** — one line, rules-marked with an accent border, replacing the four
+  runtime-generated prose notices this flow used to carry. The figures are rounded for scanning;
+  the `.chart-readout` under it carries the exact ones.
+- **`.shape-pick`** — the shape control. Three `.seg` buttons in a `radiogroup`, each drawing its
+  own price path from `priceAt` and annotated with the exponent the contract uses. It replaces a
+  `<select>`, which hid two of the three options and described a curve in words.
+
+Shape names are behaviour-first — **Even** (α1), **Patient** (α2), **Very patient** (α3). The
+exponent stays visible as a mono annotation because it is what the API, the subgraph and
+`CurveMath.sol` call it. These names are also used by the Portfolio order table; change them in
+both places or an order will be labelled one way where it is made and another where it is listed.
+
+Two rules the editor depends on:
+
+1. **The axis is frozen while a handle is being dragged.** It is otherwise derived from the very
+   price being dragged, so the plot would move under the pointer. One gesture therefore reaches
+   only as far as the band on screen; the keyboard and the number fields have the full range.
+2. **Dragging clamps, it never errors.** A buy curve's end cannot pass its start and a sell
+   curve's cannot fall below it, so a gesture always yields a publishable order. The only
+   reachable price errors come from typing, which is why they appear on blur.
+
 ## Adding a component
 
 1. Check whether an existing class already carries the pattern. Reuse beats addition.

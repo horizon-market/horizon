@@ -251,8 +251,11 @@ function Orders({ published, account, onDone }: { published: MakerCurve[]; accou
   if (published.length === 0) {
     return (
       <Empty title="No orders yet">
-        <p className="small">A limit order buys or sells at your own price and waits. A curve moves its price as it fills.</p>
-        <a className="button" href="#/publish">Publish an order</a>
+        <p className="small">
+          A limit order buys or sells at your own price and waits; a curve moves its price as it fills. Both are
+          published from a market's trade ticket — <a href="#/curves">how pricing curves work</a>.
+        </p>
+        <a className="button" href="#/">Browse markets</a>
       </Empty>
     );
   }
@@ -330,4 +333,6 @@ function tally<T>(rows: T[], state: (row: T) => string): Record<string, number> 
   return counts;
 }
 
-const SHAPE_NAMES: Record<number, string> = { 1: 'linear', 2: 'quadratic', 3: 'cubic' };
+// The names the trade ticket publishes under, so an order does not change vocabulary between the
+// screen that made it and the screen that lists it.
+const SHAPE_NAMES: Record<number, string> = { 1: 'Even', 2: 'Patient', 3: 'Very patient' };

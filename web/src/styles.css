@@ -367,6 +367,10 @@ td, dl.kv dd,
 }
 .nav a:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
 .nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+/* The right cluster is what belongs to this account. Grouping it means the fee claim, the portfolio
+   link and the wallet wrap together rather than breaking apart one at a time. */
+.nav-end { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.nav-end .nav { flex: none; }
 
 /* The fee claim is brand-coloured, never green: green means YES. */
 .zero-fee {
@@ -502,7 +506,10 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .steps span.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-semibold); }
 
 /* Curve chart ----------------------------------------------------------- */
-.chart { margin: 0; }
+/* The viewBox is 340 wide and its axis type was chosen at that size, so the plot is capped near
+   it. Without this a full-width card scales the whole drawing up several times and the ticks and
+   unit label arrive as headlines. */
+.chart { margin: 0; max-width: 32rem; }
 .chart figcaption { margin-bottom: var(--space-1); }
 .chart-plot { position: relative; }
 .chart-plot svg { display: block; width: 100%; height: auto; touch-action: none; }
@@ -654,6 +661,28 @@ button.primary .count, .seg button.active .count { background: var(--on-accent);
 .own-order { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); padding: var(--space-2); }
 .own-order + .own-order { margin-top: var(--space-2); }
 .own-order .fill { margin: var(--space-2) 0; }
+
+/* Curve editor: the chart's own endpoints are the primary control, so they carry a real target
+   and a real focus ring, and the shape buttons draw the maths they select. */
+.chart-plot.editing, .chart-handle { cursor: ns-resize; }
+.chart-plot.dragging { cursor: grabbing; }
+.chart-plot.editing svg { user-select: none; }
+.chart-hit { fill: transparent; }
+/* The crosshair tracks the pointer, so it is always drawn directly under it — and being painted
+   after the handles, it would take every press aimed at one. Feedback is never a target. */
+.chart-crosshair, .chart-point.hover, .chart-alt-label, .chart-line-label, .chart-grid, .chart-tick { pointer-events: none; }
+.chart-handle:focus { outline: none; }
+.chart-handle:focus-visible .chart-point { stroke: var(--focus); stroke-width: 2.5; }
+.chart-alt-hit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; }
+.chart-summary {
+  margin: 0; color: var(--text); font-variant-numeric: tabular-nums;
+  border-left: 2px solid var(--accent); padding-left: var(--space-2);
+}
+.curve-stale { opacity: .45; transition: opacity var(--duration-fast) var(--ease-out); }
+.shape-pick button { flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-1); line-height: var(--leading-tight); }
+.shape-pick svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.shape-pick .alpha { font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--muted); }
+.shape-pick button.active .alpha { color: var(--on-accent); }
 
 /* Design-system review page --------------------------------------------- */
 .ds-section { border-top: 1px solid var(--border); padding-top: var(--space-5); margin-top: var(--space-6); }

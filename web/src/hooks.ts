@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
-/** Hash routing keeps the built frontend deployable as static files behind the API. */
+/**
+ * Hash routing keeps the built frontend deployable as static files behind the API.
+ *
+ * `query` is rebuilt on every render, so it is safe to read during render or in a handler but must
+ * never appear in a `useAsync` dependency array — it would never compare equal and would refetch
+ * forever. Read the parameters that matter into state instead.
+ */
 export function useRoute(): { path: string[]; query: URLSearchParams; hash: string } {
   const read = () => window.location.hash.replace(/^#/, '') || '/';
   const [hash, setHash] = useState(read);
@@ -13,7 +19,16 @@ export function useRoute(): { path: string[]; query: URLSearchParams; hash: stri
   return { hash, path: pathname.split('/').filter(Boolean), query: new URLSearchParams(search) };
 }
 
-export const navigate = (to: string) => { window.location.hash = to; };
+/**
+ * A redirect has to replace its history entry rather than add one, or Back returns to the address
+ * that redirected and is sent forward again — a page the user cannot escape backwards.
+ * `replaceState` does not raise `hashchange`, so the router is told directly.
+ */
+export const navigate = (to: string, options?: { replace?: boolean }) => {
+  if (!options?.replace) { window.location.hash = to; return; }
+  window.history.replaceState(null, '', `#${to}`);
+  window.dispatchEvent(new Event('hashchange'));
+};
 
 export type Async<T> = { data?: T; error?: unknown; loading: boolean; reload: () => void };
 

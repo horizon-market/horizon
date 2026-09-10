@@ -6,7 +6,9 @@ import {
   Address, Badge, Card, Empty, Loading, Logo, Notice, TransactionState, TxLink, ZeroFee,
 } from '../components/Ui';
 import type { Curve, OutcomeBook } from '../api';
-import type { CurvePreview } from '../curve';
+import { CurveEditor, type CurveDraft } from '../components/CurveEditor';
+import { averagePrice, totalCost, type CurvePreview } from '../curve';
+import { priceUsdc, usdc } from '../format';
 
 /**
  * The living design system. Reached at `#/design` and deliberately absent from the
@@ -408,16 +410,29 @@ export function DesignSystem() {
       </section>
 
       <section className="ds-section">
-        <h2>Curve editor chart</h2>
+        <h2>Curve chart</h2>
+        <p className="small muted">
+          Read-only. The figures come from the same integral the chart draws, so a specimen cannot drift from
+          what an order would really cost.
+        </p>
         <div style={{ maxWidth: '30rem' }}>
           <CurveChart curve={CURVE} size={CURVE.shares} />
           <div className="chart-readout">
-            <div><div className="label">Start</div><div className="value">0.6200</div></div>
-            <div><div className="label">End</div><div className="value">0.4300</div></div>
-            <div><div className="label">Average</div><div className="value">0.5567</div></div>
-            <div><div className="label">Posts</div><div className="value">13.92</div></div>
+            <div><div className="label">Start</div><div className="value">{priceUsdc(CURVE.startPrice)}</div></div>
+            <div><div className="label">End</div><div className="value">{priceUsdc(CURVE.endPrice)}</div></div>
+            <div><div className="label">Average</div><div className="value">{priceUsdc(averagePrice(CURVE))}</div></div>
+            <div><div className="label">Posts</div><div className="value">{usdc(totalCost(CURVE))}</div></div>
           </div>
         </div>
+      </section>
+
+      <section className="ds-section">
+        <h2>Curve editor</h2>
+        <p className="small muted">
+          Editable. The two endpoints are draggable and keyboard-adjustable sliders, the dashed shapes are
+          clickable, and the shape buttons draw the curve they select. Try it — this specimen is live.
+        </p>
+        <div style={{ maxWidth: '30rem' }}><CurveEditorSpecimen /></div>
       </section>
 
       <section className="ds-section">
@@ -437,7 +452,7 @@ export function DesignSystem() {
           </div>
           <div className="field">
             <label htmlFor="ds-shape">Shape</label>
-            <select id="ds-shape" defaultValue="2"><option value="1">α1 — linear</option><option value="2">α2</option><option value="3">α3</option></select>
+            <select id="ds-shape" defaultValue="2"><option value="1">Even (α1)</option><option value="2">Patient (α2)</option><option value="3">Very patient (α3)</option></select>
           </div>
           <div className="field">
             <label htmlFor="ds-rules">Resolution rules</label>
@@ -487,4 +502,10 @@ function Swatches({ tokens }: { tokens: string[] }) {
       ))}
     </div>
   );
+}
+
+/** Live, because a control whose whole point is that you can grab it is not reviewable as a picture. */
+function CurveEditorSpecimen() {
+  const [draft, setDraft] = useState<CurveDraft>({ isBuy: true, start: '0.62', end: '0.43', shape: 2 });
+  return <CurveEditor draft={draft} shares={25_000_000n} onChange={patch => setDraft(was => ({ ...was, ...patch }))} />;
 }

@@ -2,19 +2,28 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, type MakerCurve, type Market, type Position, type Publication, type Quote } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
-import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState, ZeroFee, describe, type TxState } from '../components/Ui';
+import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
 import { isLive, useCancelCurve } from '../orders';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
 import { OrderBook } from '../components/OrderBook';
 import { CurveLiquidity } from '../components/CurveLiquidity';
+import { CurveOrder } from '../components/CurveOrder';
 import { separate } from '../curve';
 import { approve, confirm, describeWalletError, send } from '../wallet';
 
 const RESULTS = ['Unresolved', 'YES', 'NO', 'INVALID'];
 
-export function MarketDetail({ market }: { market: string }) {
+export function MarketDetail({ market, query }: { market: string; query: URLSearchParams }) {
   const detail = useAsync(() => api.market(market), [market]);
   const account = useWallet().account;
+  // Deep-link parameters are read once, at mount. `query` is a fresh object on every render, so
+  // anything that watched it would never settle; `App` keys this component on the address, which is
+  // what makes these initializers run again on the way to a different market.
+  const [opening] = useState(() => ({
+    type: (query.get('ticket') === 'limit' ? 'limit' : query.get('ticket') === 'curve' ? 'curve' : 'market') as OrderType,
+    isYes: query.get('side') !== 'no',
+    isBuy: query.get('direction') !== 'sell',
+  }));
   // What this account already has in this market: the orders it is resting here, and the outcome
   // tokens it holds. Both come from endpoints that cover every market, filtered to this one.
   const mine = useAsync(async () => {
@@ -23,7 +32,7 @@ export function MarketDetail({ market }: { market: string }) {
     const here = (id: string) => id.toLowerCase() === market.toLowerCase();
     return { orders: published.curves.filter(curve => here(curve.market)), position: held.positions.find(p => here(p.market)) };
   }, [account, market]);
-  const [isYes, setIsYes] = useState(true);
+  const [isYes, setIsYes] = useState(opening.isYes);
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
   const data = detail.data!.market;
@@ -63,7 +72,6 @@ export function MarketDetail({ market }: { market: string }) {
           {data.result !== 0 && <><dt>Evidence</dt><dd>{data.resolutionEvidence}</dd></>}
         </dl>
       </Card>
-      <ZeroFee />
       <div className="split">
         <div className="stack">
           {/* Both cards read the outcome chosen in the trade ticket; they carry no selector of their own. */}
@@ -83,7 +91,7 @@ export function MarketDetail({ market }: { market: string }) {
         <div className="stack">
           {data.status === 'OPEN'
             ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes}
-                account={account} position={mine.data?.position} onDone={refresh} />
+                account={account} position={mine.data?.position} onDone={refresh} opening={opening} />
             : <Card title="Trading closed">
                 <p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Portfolio</a>.</p>
                 {/* The ticket is what normally chooses the outcome, so a closed market lends its selector. */}
@@ -113,31 +121,38 @@ function OutcomeChoice({ isYes, onOutcome }: { isYes: boolean; onOutcome: (value
 }
 
 type Side = { isYes: boolean; isBuy: boolean };
-type OrderType = 'market' | 'limit';
+type OrderType = 'market' | 'limit' | 'curve';
 
 const label = (side: Side) => `${side.isBuy ? 'Buy' : 'Sell'} ${side.isYes ? 'YES' : 'NO'}`;
+const TABS: { key: OrderType; label: string }[] = [
+  { key: 'market', label: 'Market' }, { key: 'limit', label: 'Limit' }, { key: 'curve', label: 'Curve' },
+];
 
 /**
- * One ticket for both ways to trade. A market order takes an existing route immediately; a limit
- * order rests at the maker's own price until someone fills it. Underneath, the limit order is an
- * Aqua order whose start and end prices are equal, which is what the contract treats as fixed.
+ * One ticket for all three ways to trade, in order of how much the maker gets to say. A market
+ * order takes an existing route immediately; a limit order rests at one price until someone fills
+ * it; a curve rests across a range and reprices itself as it fills. Underneath they are the same
+ * Aqua order — a limit order is simply the one whose start and end prices are equal — which is why
+ * they belong on one control rather than on separate pages.
  */
-function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone }: {
+function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone, opening }: {
   market: string; book: Market['liquidity']; isYes: boolean; onOutcome: (isYes: boolean) => void;
   account?: string; position?: Position; onDone: () => void;
+  opening: { type: OrderType; isBuy: boolean };
 }) {
   const wallet = useWallet();
-  const [type, setType] = useState<OrderType>('market');
-  const [isBuy, setIsBuy] = useState(true);
+  const [type, setType] = useState<OrderType>(opening.type);
+  const [isBuy, setIsBuy] = useState(opening.isBuy);
   const side: Side = { isYes, isBuy };
   const outcome = isYes ? book.yes : book.no;
 
   return (
     <Card title="Trade">
-      <div className="seg tabs">
-        {(['market', 'limit'] as const).map(option => (
-          <button key={option} className={type === option ? 'active' : ''} onClick={() => setType(option)}>
-            {option === 'market' ? 'Market' : 'Limit'}
+      <div className="seg tabs" role="radiogroup" aria-label="Order type">
+        {TABS.map(tab => (
+          <button key={tab.key} role="radio" aria-checked={type === tab.key}
+            className={type === tab.key ? 'active' : ''} onClick={() => setType(tab.key)}>
+            {tab.label}
           </button>
         ))}
       </div>
@@ -158,16 +173,18 @@ function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone
             : 'You hold no outcome tokens in this market, so there is nothing to sell yet.'}
         </p>
       )}
-      {type === 'market'
-        ? <MarketOrder market={market} side={side} account={account} onDone={onDone} onSwitchToLimit={() => setType('limit')} />
-        : <LimitOrder market={market} side={side} account={account} book={outcome} onDone={onDone} />}
+      {type === 'market' && <MarketOrder market={market} side={side} account={account} onDone={onDone} onSwitchToLimit={() => setType('limit')} />}
+      {type === 'limit' && <LimitOrder market={market} side={side} account={account} book={outcome} onDone={onDone} />}
+      {type === 'curve' && <CurveOrder market={market} side={side} account={account} book={outcome} onDone={onDone} />}
       {!account && (
         <button className="primary" style={{ width: '100%', marginTop: '.6rem' }} onClick={() => void wallet.connect()}>Connect wallet</button>
       )}
-      <p className="small muted" style={{ marginTop: '.75rem', marginBottom: 0 }}>
-        Need a price that moves as the order fills?{' '}
-        <a href={`#/publish?market=${market}&side=${side.isYes ? 'yes' : 'no'}&direction=${side.isBuy ? 'buy' : 'sell'}`}>Publish a pricing curve</a>.
-      </p>
+      {type === 'curve' && (
+        <p className="small muted" style={{ marginTop: '.75rem', marginBottom: 0 }}>
+          A curve rests across a range of prices and moves through it as it fills.{' '}
+          <a href="#/curves">How pricing curves work</a>.
+        </p>
+      )}
     </Card>
   );
 }
