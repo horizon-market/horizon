@@ -388,6 +388,12 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: va
   border-radius: var(--radius-lg); box-shadow: var(--shadow-1); padding: var(--space-4);
 }
 .card + .card { margin-top: var(--space-4); }
+/* A card lays its children out in normal flow, where the total panel and a notice
+   carry no margin of their own: a control or note placed straight after one paints
+   its border flush on the panel's and the two read as a single overlapping box.
+   `.stack` spaces its children with `gap`, so this stays on a card's own children. */
+.card > dl.kv.total + *,
+.card > .notice + * { margin-top: var(--space-3); }
 .grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .split { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }
 @media (min-width: 860px) { .split { grid-template-columns: 3fr 2fr; align-items: start; } }
