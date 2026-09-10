@@ -25,6 +25,9 @@ test('creation workflow only advances along declared transitions', () => {
   assert.equal(transition('CREATING', 'created'), 'CREATED');
   assert.equal(transition('CREATING', 'fail'), 'FAILED');
   assert.equal(transition('FAILED', 'retry'), 'CREATING');
+  // A run that died with its process leaves the request in CREATING with nothing left to mark it
+  // FAILED, so resuming has to be allowed from there or the paid request can never be created.
+  assert.equal(transition('CREATING', 'retry'), 'CREATING');
   // Skipping review, approval or payment is impossible, and a created market is terminal.
   for (const [status, event] of [['DRAFT', 'require_payment'], ['DRAFT', 'settle'], ['APPROVED', 'settle'],
     ['PAYMENT_REQUIRED', 'start_creation'], ['CREATED', 'retry'], ['CREATED', 'approve']] as [Status, Parameters<typeof transition>[1]][]) {

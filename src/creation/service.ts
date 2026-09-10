@@ -23,7 +23,12 @@ export const TRANSITIONS: Record<Status, Partial<Record<Event, Status>>> = {
   PAYMENT_REQUIRED: { settle: 'PAID', review: 'PAYMENT_REVIEW', abandon: 'ABANDONED' },
   PAYMENT_REVIEW: { settle: 'PAID' },
   PAID: { start_creation: 'CREATING' },
-  CREATING: { created: 'CREATED', fail: 'FAILED' },
+  // `retry` re-enters CREATING so an interrupted run is resumable. A run that dies with the
+  // process — a restarted worker, a killed container — leaves the request here with no code
+  // left to record a failure, and without this edge every later attempt would be refused and
+  // the paid request stranded. Re-entry is safe: the registry is checked for each creation id
+  // before anything is broadcast, so nothing is deployed or charged twice.
+  CREATING: { created: 'CREATED', fail: 'FAILED', retry: 'CREATING' },
   FAILED: { retry: 'CREATING' },
   CREATED: {},
   // A requester walks away from their own request, and only before money moves: `abandon` exists on
@@ -701,12 +706,16 @@ export class CreationService {
     if (request.status === 'CREATED') return request;
     if (request.payment?.status !== 'SETTLED') throw new WorkflowError('creation_before_settlement');
     if (!this.deps.deployer) throw new WorkflowError('creation_not_configured', 503);
-    const status = transition(request.status as Status, request.status === 'FAILED' ? 'retry' : 'start_creation');
+    // Only a freshly paid request starts creation; CREATING and FAILED resume one. Every other
+    // status has neither edge, so an API caller still cannot skip a step.
+    const status = transition(request.status as Status, request.status === 'PAID' ? 'start_creation' : 'retry');
     await this.deps.db.creationRequest.update({ where: { id }, data: { status, attempts: { increment: 1 }, failureCode: null, failureDetail: null } });
-    if (request.kind === 'GROUP') return this.runGroupCreation(request);
-    const draft = draftSchema.parse(request.draft);
-    if (request.approvedHash !== draftHash(draft)) throw new WorkflowError('draft_not_approved');
+    // Everything past the move into CREATING runs inside the catch: a throw that escaped it would
+    // leave the request in a state whose failure nothing had recorded.
     try {
+      if (request.kind === 'GROUP') return await this.runGroupCreation(request);
+      const draft = draftSchema.parse(request.draft);
+      if (request.approvedHash !== draftHash(draft)) throw new WorkflowError('draft_not_approved');
       const created = await this.deps.deployer.create({
         requestId: id, question: draft.question, rules: draft.rules, evidenceSource: draft.evidenceSource,
         closeAt: Math.floor(new Date(draft.closeAt).getTime() / 1000),
@@ -716,7 +725,12 @@ export class CreationService {
       });
     } catch (error) {
       const code = error instanceof Error ? error.message.slice(0, 120) : 'creation_failed';
-      await this.deps.db.creationRequest.update({ where: { id }, data: { status: 'FAILED', failureCode: 'creation_failed', failureDetail: code } });
+      // A group records its own, more precise failure before it throws; this is the catch-all for a
+      // run that threw before reaching that point, and it must not overwrite the better message.
+      await this.deps.db.creationRequest.updateMany({
+        where: { id, status: { not: 'FAILED' } },
+        data: { status: 'FAILED', failureCode: 'creation_failed', failureDetail: code },
+      });
       throw error;
     }
   }

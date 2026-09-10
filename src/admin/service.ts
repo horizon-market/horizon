@@ -109,7 +109,10 @@ export class AdminService {
     const request = await this.deps.db.creationRequest.findUnique({ where: { id: requestId }, include: { payment: true } });
     if (!request) throw new WorkflowError('unknown_request', 404);
     if (request.payment?.status !== 'SETTLED') throw new WorkflowError('creation_before_settlement');
-    if (!['PAID', 'FAILED'].includes(request.status)) throw new WorkflowError('creation_not_retryable');
+    // CREATING is retryable because a run that died with its process leaves the request there
+    // with nothing left to mark it FAILED. The queue recovers that on its own once the job
+    // expires; this is the lever for the case where the job exhausted its retries first.
+    if (!['PAID', 'FAILED', 'CREATING'].includes(request.status)) throw new WorkflowError('creation_not_retryable');
     if (!this.deps.enqueueCreation) throw new WorkflowError('queue_not_configured', 503);
     await this.deps.enqueueCreation(requestId);
     await this.audit(actor, 'creation.retry', requestId, { status: request.status });

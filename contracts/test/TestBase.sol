@@ -18,6 +18,7 @@ interface Vm {
     function stopPrank() external;
     function expectRevert() external;
     function expectRevert(bytes4 selector) external;
+    function expectRevert(bytes calldata revertData) external;
     function recordLogs() external;
     function getRecordedLogs() external returns (Log[] memory);
 }

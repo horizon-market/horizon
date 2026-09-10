@@ -44,6 +44,9 @@ contract CurveRoutesTest is TestBase {
         amounts[s.flags & 2 != 0 ? 1 : 0] = s.flags & 2 != 0 ? router.curveCumulative(s, s.maxShares) : s.maxShares;
         vm.prank(MAKER);
         aqua.ship(address(router), abi.encode(order), tokens, amounts);
+        // Shipping publishes the order; admitting it is what makes this router execute it.
+        vm.prank(MAKER);
+        router.admitCurve(s);
         return router.hash(order);
     }
 

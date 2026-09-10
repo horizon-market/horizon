@@ -345,6 +345,33 @@ test('a partial deployment failure keeps what was created, charges nothing more,
   assert.equal(payment.amountUnits, '300000000');
 });
 
+test('a run interrupted mid-deployment resumes instead of stranding the paid request', { timeout: 60_000 }, async () => {
+  const facilitator = new TestFacilitator();
+  const deployer = new RecordingDeployer();
+  const target = service('interrupted', { facilitator, deployer });
+  const result = await target.createImport({ idempotencyKey: randomUUID(), url: eventAddress('interrupted'), requesterKind: 'agent', requester: 'agent-interrupted' });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const { id } = await track(result.request);
+  await target.approve(id, result.token!, result.request.draftHash!);
+  await payFor(target, id, result.token!);
+
+  // The shape a worker leaves behind when it dies mid-run: the request and the child it had
+  // started are CREATING, and no catch ever ran to record a failure.
+  const first = await db.creationChild.findFirstOrThrow({ where: { requestId: id }, orderBy: { position: 'asc' } });
+  await db.creationRequest.update({ where: { id }, data: { status: 'CREATING' } });
+  await db.creationChild.update({ where: { id: first.id }, data: { status: 'CREATING', attempts: 1 } });
+
+  const resumed = await target.runCreation(id);
+  assert.equal(resumed.status, 'CREATED');
+  const children = await db.creationChild.findMany({ where: { requestId: id }, orderBy: { position: 'asc' } });
+  assert.deepEqual(children.map(child => child.status), ['CREATED', 'CREATED', 'CREATED']);
+  assert.equal(new Set(children.map(child => child.marketAddress)).size, 3);
+  // The interrupted run broadcast nothing, so the resume deploys all three and charges nothing more.
+  assert.equal(deployer.broadcasts.length, 3);
+  assert.equal(facilitator.settleCalls, 1);
+});
+
 test('a market address imports the event with only that market selected', { timeout: 30_000 }, async () => {
   const target = service('single', { gamma: focusedGamma('single'), deployer: new RecordingDeployer() });
   const preview = await target.previewImport(marketAddress('single'));

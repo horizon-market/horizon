@@ -34,6 +34,8 @@ contract ComplementaryMatchTest is TestBase {
     function ship(HorizonSwapVM.BuyStrategy memory s) internal returns (ISwapVM.Order memory order) {
         order = router.buildBuyOrder(MAKER, s);
         shipOrder(order, router.outcome(s), address(usdc), uint256(s.maxShares) * s.price / 1e6);
+        vm.prank(MAKER);
+        router.admitBuy(s);
     }
 
     function shipOrder(ISwapVM.Order memory order, address input, address output, uint256 budget) internal {
@@ -171,13 +173,25 @@ contract ComplementaryMatchTest is TestBase {
     }
 
     function testUSDCSharedAcrossMarketsCannotBeDoubleSpent() public {
-        vm.prank(MAKER);
-        usdc.transfer(address(this), 99_600_000);
+        // Both markets may commit the same 4 USDC: the per-market budget never subtracts the other
+        // market's commitments. What money cannot do is pay both, which is what this asserts.
         ship(strategy);
         BinaryMarket second = makeMarket(bytes32(uint256(2)));
         HorizonSwapVM.BuyStrategy memory other = strategy;
         other.market = address(second);
         ISwapVM.Order memory order = ship(other);
+        (uint256 spendable,, uint256 available,) = router.marketBudget(MAKER, address(second), address(usdc));
+        eq(spendable, 100e6);
+        eq(available, 96e6);
+        vm.prank(MAKER);
+        usdc.transfer(address(this), 99_600_000);
+        // The wallet now funds one fill. The second market is over budget and admits nothing more,
+        // but its already-published order is still counted, not quietly forgotten.
+        (uint256 nowSpendable, uint256 nowCommitted, uint256 nowAvailable,) =
+            router.marketBudget(MAKER, address(second), address(usdc));
+        eq(nowSpendable, 400_000);
+        eq(nowCommitted, 4e6);
+        eq(nowAvailable, 0);
         fill(strategy, 1e6, 600_000);
         vm.expectRevert();
         fill(other, 1e6, 600_000);
