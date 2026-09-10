@@ -23,8 +23,8 @@ jobs:
       DATABASE_URL: postgresql://horizon:horizon_ci_only@127.0.0.1:54329/horizon_test
       TEST_DATABASE_URL: postgresql://horizon:horizon_ci_only@127.0.0.1:54329/horizon_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -39,8 +39,8 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -51,12 +51,12 @@ jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.2.3
       - run: forge test --root contracts -vv
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
