@@ -56,7 +56,11 @@ const positiveInteger = (value: string | undefined, fallback: bigint) => {
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const result = schema.safeParse(env);
+  // Production platforms such as Railway inject environment variables without creating a .env
+  // file and route traffic to the container over its network interface. Keep local development
+  // bound to loopback, but make the production default reachable without provider-specific config.
+  const input = env.HOST || env.NODE_ENV !== 'production' ? env : { ...env, HOST: '0.0.0.0' };
+  const result = schema.safeParse(input);
   if (!result.success) {
     // Never print the input object: it contains database credentials and secrets.
     throw new Error(`Invalid configuration: ${result.error.issues.map(i => i.path.join('.')).join(', ')}. See .env.example.`);

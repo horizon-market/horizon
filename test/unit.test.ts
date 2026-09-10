@@ -32,3 +32,15 @@ test('World sandbox is preserved as an IDKit environment', () => {
   });
   assert.equal(config.world.environment, 'sandbox');
 });
+
+test('production binds to the container network unless HOST is explicitly set', () => {
+  const base = {
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgresql://horizon:test@127.0.0.1:5432/horizon',
+    ADMIN_EMAIL: 'admin@horizon.local',
+    ADMIN_PASSWORD_HASH: `scrypt$${'11'.repeat(16)}$${'22'.repeat(64)}`,
+    SESSION_SECRET: 'test-session-secret-that-is-long-enough',
+  };
+  assert.equal(loadConfig(base).HOST, '0.0.0.0');
+  assert.equal(loadConfig({ ...base, HOST: '127.0.0.1' }).HOST, '127.0.0.1');
+});
