@@ -2,7 +2,7 @@
 
 The tokens live in [`web/src/styles.css`](../web/src/styles.css). The living reference — every
 token and every component rendered from the real code, with a theme switch — is the application
-route **`#/design`**, deliberately absent from the navigation like the operator screen. It renders
+route **`/design`**, deliberately absent from the navigation like the operator screen. It renders
 from tokens alone, so it works without a configured API behind it.
 
 Dark is the default theme. Light is the alternate, offered to anyone whose system asks for it.
@@ -186,7 +186,7 @@ light. An explicit `data-theme` on the document element wins over both — the `
 makes forcing dark possible. `color-scheme` is set in both branches so form controls and scrollbars
 follow.
 
-Today only `#/design` writes `data-theme`. A user-facing theme switch in the top bar would reuse
+Today only `/design` writes `data-theme`. A user-facing theme switch in the top bar would reuse
 the same mechanism.
 
 ## Portfolio components
@@ -216,9 +216,9 @@ which keeps state colour consistent with the rest of the app:
 
 ## Curve editor components
 
-The curve editor is one component reused by the trade ticket's **Curve** tab and by the `#/curves`
+The curve editor is one component reused by the trade ticket's **Curve** tab and by the `/curves`
 explainer. It is deliberately free of wallet, market and API access, which is what lets the
-explainer render outside the API config gate the way `#/design` does.
+explainer render outside the API config gate the way `/design` does.
 
 - **`CurveChart`** — one chart, two modes. Without `onChange` it is a read-only picture and its
   `<svg>` keeps `role="img"`. With `onChange` it becomes an editor: `role` changes to `group` so
@@ -261,7 +261,7 @@ Two rules the editor depends on:
 5. Bound a control with `--border-strong`, a decorative region with `--border`.
 6. If it carries state, pair colour with a second cue — a label, an icon, or position.
 7. Add it to `web/src/pages/DesignSystem.tsx` in every state it can occupy. A component absent from
-   `#/design` is a component nobody will notice breaking.
+   `/design` is a component nobody will notice breaking.
 
 ## Decisions and alternatives
 

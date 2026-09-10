@@ -44,13 +44,13 @@ export function App() {
   const active = `/${route.path.join('/')}`;
   const standalone = STANDALONE.has(route.path[0] ?? '');
   const link = ([href, label]: readonly [string, string]) => (
-    <a key={href} href={`#${href}`}
+    <a key={href} href={href}
       aria-current={active === href || (href !== '/' && active.startsWith(href)) ? 'page' : undefined}>{label}</a>
   );
   return (
     <div className="app">
       <header className="topbar">
-        <a className="brand" href="#/" aria-label="Horizon home"><Logo /></a>
+        <a className="brand" href="/" aria-label="Horizon home"><Logo /></a>
         <nav className="nav">{LINKS.map(link)}</nav>
         {/* Everything that belongs to this account sits together, next to the wallet it belongs to. */}
         <div className="nav-end">
@@ -82,7 +82,7 @@ export function App() {
       <footer>
         Horizon settles on Ethereum Sepolia with test USDC. Markets are resolved by a disclosed centralized resolver;
         INVALID pays 0.5 USDC per outcome token. Zero trading fees; market creation is a separate paid service.
-        {' '}<a href="#/curves">How pricing curves work</a>.
+        {' '}<a href="/curves">How pricing curves work</a>.
       </footer>
     </div>
   );
@@ -102,9 +102,9 @@ function Page({ route }: { route: ReturnType<typeof useRoute> }) {
   // into that market's ticket rather than dying.
   if (section === 'publish') return <Redirect to={publishTarget(route.query)} />;
   if (section === 'create') return <CreateMarket />;
-  if (section === 'admin') return <Admin />;
+  if (section === 'operator') return <Admin />;
   if (section === 'design') return <DesignSystem />;
-  return <Notice kind="warn">That page does not exist. <a href="#/">Back to markets</a>.</Notice>;
+  return <Notice kind="warn">That page does not exist. <a href="/">Back to markets</a>.</Notice>;
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;

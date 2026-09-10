@@ -342,13 +342,13 @@ function ExistingNotice({ existing }: { existing: ExistingImport }) {
     <Notice kind="warn">
       <strong>This page has already been imported into Horizon.</strong>{' '}
       {created.length > 0
-        ? <>It became <a href={`#/events/${existing.slug}`}>{existing.title}</a>, with {created.length} market{created.length === 1 ? '' : 's'} already created.
+        ? <>It became <a href={`/events/${existing.slug}`}>{existing.title}</a>, with {created.length} market{created.length === 1 ? '' : 's'} already created.
             Trade those instead of paying to create them again.</>
         : <>An import of it is already in progress as “{existing.title}”. Nothing further is charged; wait for it to finish, or discard it from the browser that started it.</>}
       {created.length > 0 && (
         <ul style={{ margin: '.4rem 0 0', paddingLeft: '1.1rem' }}>
           {created.map(market => (
-            <li key={market.position}><a href={`#/markets/${market.marketAddress}`}>{market.outcomeLabel}</a></li>
+            <li key={market.position}><a href={`/markets/${market.marketAddress}`}>{market.outcomeLabel}</a></li>
           ))}
         </ul>
       )}
@@ -569,7 +569,7 @@ function Review({ request }: { request: CreationRequest }) {
               <ul style={{ margin: '.4rem 0 0', paddingLeft: '1.1rem' }}>
                 {warnings.map(warning => (
                   <li key={warning.market}>
-                    <a href={`#/markets/${warning.market}`}>{warning.question}</a> — {Math.round(warning.similarity * 100)}% overlap. {warning.reason}
+                    <a href={`/markets/${warning.market}`}>{warning.question}</a> — {Math.round(warning.similarity * 100)}% overlap. {warning.reason}
                   </li>
                 ))}
               </ul>
@@ -681,7 +681,7 @@ function GroupReview({ request, saved, busy, act, onChange }: {
               )}
               {child.marketAddress && (
                 <p className="small" style={{ marginBottom: 0 }}>
-                  <a href={`#/markets/${child.marketAddress}`}>Open this market</a>
+                  <a href={`/markets/${child.marketAddress}`}>Open this market</a>
                   {child.creationTxHash && <> · <TxLink hash={child.creationTxHash} /></>}
                 </p>
               )}
@@ -920,7 +920,7 @@ function Outcome({ request, busy, onRefresh, onReset }: { request: CreationReque
             : 'none'}
         </dd>
         <dt>Attempts</dt><dd>{request.attempts}</dd>
-        {request.marketAddress && <><dt>Market</dt><dd><a href={`#/markets/${request.marketAddress}`}>{request.marketAddress}</a></dd></>}
+        {request.marketAddress && <><dt>Market</dt><dd><a href={`/markets/${request.marketAddress}`}>{request.marketAddress}</a></dd></>}
         {request.creationTxHash && <><dt>Transaction</dt><dd><TxLink hash={request.creationTxHash} /></dd></>}
         {request.failureCode && <><dt>Failure</dt><dd>{request.failureDetail ?? request.failureCode}</dd></>}
       </dl>
@@ -962,8 +962,8 @@ function Outcome({ request, busy, onRefresh, onReset }: { request: CreationReque
       {request.status === 'CREATED' && (
         <Notice kind="ok">
           {group
-            ? <>All {selected.length} markets are live. They appear under <a href={`#/events/${request.event?.slug}`}>{request.event?.title}</a> once The Graph has indexed them.</>
-            : <>The market is live. It appears in <a href="#/">Markets</a> once The Graph has indexed it.</>}
+            ? <>All {selected.length} markets are live. They appear under <a href={`/events/${request.event?.slug}`}>{request.event?.title}</a> once The Graph has indexed them.</>
+            : <>The market is live. It appears in <a href="/">Markets</a> once The Graph has indexed it.</>}
           <button className="link" style={{ marginLeft: '.5rem' }} onClick={onReset}>Start another request</button>
         </Notice>
       )}

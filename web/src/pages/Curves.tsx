@@ -109,7 +109,7 @@ export function Curves() {
           Curves are published from a market, against the book you are competing with. Open any market and choose
           the <strong>Curve</strong> tab in its trade ticket.
         </p>
-        <a className="button primary" href="#/">Browse markets</a>
+        <a className="button primary" href="/">Browse markets</a>
       </Card>
     </div>
   );

@@ -19,7 +19,7 @@ function EventLabel({ context }: { context: { slug: string; title: string; outco
   if (!context) return null;
   return (
     <div className="small muted">
-      {context.outcomeLabel} · <a href={`#/events/${context.slug}`}>{context.title}</a>
+      {context.outcomeLabel} · <a href={`/events/${context.slug}`}>{context.title}</a>
     </div>
   );
 }
@@ -116,7 +116,7 @@ export function Holdings({ query }: { query: URLSearchParams }) {
       {resumable.length > 0 && tab !== 'requests' && (
         <Notice kind="info">
           You have {resumable.length} market request{resumable.length === 1 ? '' : 's'} still in progress.{' '}
-          <a href="#/holdings?tab=requests">Pick {resumable.length === 1 ? 'it' : 'one'} up</a>.
+          <a href="/holdings?tab=requests">Pick {resumable.length === 1 ? 'it' : 'one'} up</a>.
         </Notice>
       )}
 
@@ -212,7 +212,7 @@ function Positions({ held, account, events, onDone }: { held: Position[]; accoun
     return (
       <Empty title="No outcome tokens yet">
         <p className="small">Buy YES or NO in any open market and the position appears here.</p>
-        <a className="button" href="#/">Browse markets</a>
+        <a className="button" href="/">Browse markets</a>
       </Empty>
     );
   }
@@ -239,7 +239,7 @@ function Positions({ held, account, events, onDone }: { held: Position[]; accoun
                     return (
                       <tr key={position.market}>
                         <td>
-                          <a href={`#/markets/${position.market}`}>{position.question}</a>
+                          <a href={`/markets/${position.market}`}>{position.question}</a>
                           <EventLabel context={events.get(position.market.toLowerCase())} />
                           <div className="small muted">{position.status === 'OPEN' ? timeLeft(position.closeAt) : dateTime(position.closeAt)}</div>
                         </td>
@@ -258,7 +258,7 @@ function Positions({ held, account, events, onDone }: { held: Position[]; accoun
                             ? <button className="primary" disabled={busy !== undefined} onClick={() => void redeem(position)}>
                                 {busy === position.market ? 'Redeeming…' : 'Redeem'}
                               </button>
-                            : <a className="button" href={`#/markets/${position.market}`}>{state === 'open' ? 'Trade' : 'View'}</a>}
+                            : <a className="button" href={`/markets/${position.market}`}>{state === 'open' ? 'Trade' : 'View'}</a>}
                         </td>
                       </tr>
                     );
@@ -289,9 +289,9 @@ function Orders({ published, account, events, onDone }: { published: MakerCurve[
       <Empty title="No orders yet">
         <p className="small">
           A limit order buys or sells at your own price and waits; a curve moves its price as it fills. Both are
-          published from a market's trade ticket — <a href="#/curves">how pricing curves work</a>.
+          published from a market's trade ticket — <a href="/curves">how pricing curves work</a>.
         </p>
-        <a className="button" href="#/">Browse markets</a>
+        <a className="button" href="/">Browse markets</a>
       </Empty>
     );
   }
@@ -313,7 +313,7 @@ function Orders({ published, account, events, onDone }: { published: MakerCurve[
                     return (
                       <tr key={curve.orderHash}>
                         <td>
-                          <a href={`#/markets/${curve.market}`}>{curve.question}</a>
+                          <a href={`/markets/${curve.market}`}>{curve.question}</a>
                           <EventLabel context={events.get(curve.market.toLowerCase())} />
                           <div className="small muted">{curve.marketStatus === 'OPEN' ? timeLeft(curve.closeAt) : curve.marketStatus.toLowerCase()}</div>
                         </td>
@@ -365,7 +365,7 @@ function Requests({ state }: { state: Async<CreationSummary[]> }) {
     return (
       <Empty title="No market requests yet">
         <p className="small">Create a single market, a group of markets, or import an event definition.</p>
-        <a className="button" href="#/create">Create a market</a>
+        <a className="button" href="/create">Create a market</a>
       </Empty>
     );
   }
@@ -386,7 +386,7 @@ function Requests({ state }: { state: Async<CreationSummary[]> }) {
                       <div className="small muted">
                         {request.event.sourceProvider === 'horizon' ? 'Event created on Horizon' : `Imported from ${request.event.sourceProvider}`}
                         {request.event.exclusivity === 'EXCLUSIVE' && ' · exactly one winner'}
-                        {request.childrenCreated > 0 && <> · <a href={`#/events/${request.event.slug}`}>view event</a></>}
+                        {request.childrenCreated > 0 && <> · <a href={`/events/${request.event.slug}`}>view event</a></>}
                       </div>
                     )}
                     <div className="small muted">{dateTime(request.createdAt)}</div>
@@ -406,11 +406,11 @@ function Requests({ state }: { state: Async<CreationSummary[]> }) {
                   </td>
                   <td>
                     {request.marketAddress
-                      ? <a className="button" href={`#/markets/${request.marketAddress}`}>Open market</a>
+                      ? <a className="button" href={`/markets/${request.marketAddress}`}>Open market</a>
                       : !isFinished(request.status) && token
                         ? <button className="primary" onClick={() => { activateCreation({ id: request.id, token }); navigate('/create'); }}>Resume</button>
                         : request.event && request.childrenCreated > 0
-                          ? <a className="button" href={`#/events/${request.event.slug}`}>Open event</a>
+                          ? <a className="button" href={`/events/${request.event.slug}`}>Open event</a>
                           : <span className="muted small">—</span>}
                   </td>
                 </tr>

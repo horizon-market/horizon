@@ -106,7 +106,7 @@ function Panel({ email, onSignOut }: { email: string; onSignOut: () => void }) {
               <tbody>
                 {data.events.map(event => (
                   <tr key={event.id}>
-                    <td><a href={`#/events/${event.slug}`}>{event.title}</a><div className="small muted mono">{event.slug}</div></td>
+                    <td><a href={`/events/${event.slug}`}>{event.title}</a><div className="small muted mono">{event.slug}</div></td>
                     <td className="small">
                       {event.exclusivity === 'EXCLUSIVE' ? 'Exactly one winner' : 'Collection'}
                       <div className="muted">{event.exclusivityEnforcement === 'backend_only' ? 'checked in this workflow only' : 'no rule'}</div>

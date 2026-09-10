@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, type EventChild, type HorizonEvent } from '../api';
-import { useAsync } from '../hooks';
+import { navigate, useAsync } from '../hooks';
 import { useWallet } from '../App';
 import { Address, Badge, Card, Empty, ErrorBox, Loading, Notice, ZeroFee } from '../components/Ui';
 import { MarketOrder } from '../components/MarketOrder';
@@ -28,7 +28,7 @@ export function EventDetail({ slug }: { slug: string }) {
   return (
     <div className="stack">
       <div className="row between">
-        <a href="#/">← All markets</a>
+        <a href="/">← All markets</a>
         <button onClick={detail.reload}>Refresh</button>
       </div>
       <ZeroFee />
@@ -170,7 +170,7 @@ function ChildRow({ child, account, onDone }: { child: EventChild; account?: str
     <Card>
       <div className="event-row">
         <div className="event-row-name">
-          <a href={`#/markets/${address}`}><strong>{child.outcomeLabel}</strong></a>
+          <a href={`/markets/${address}`}><strong>{child.outcomeLabel}</strong></a>
           <div className="small muted">{market.question}</div>
         </div>
         <div className="event-row-meta">
@@ -198,15 +198,15 @@ function ChildRow({ child, account, onDone }: { child: EventChild; account?: str
         <div className="event-row-ticket">
           {/* The same market-order control the market page uses, pointed at this child. */}
           <MarketOrder market={address} side={{ isYes: open === 'yes', isBuy: true }} account={account}
-            onDone={onDone} onSwitchToLimit={() => { window.location.hash = `/markets/${address}?ticket=limit&side=${open}`; }} />
+            onDone={onDone} onSwitchToLimit={() => navigate(`/markets/${address}?ticket=limit&side=${open}`)} />
           <p className="small muted" style={{ marginBottom: 0 }}>
-            Selling, limit orders and curves for this outcome live on its own <a href={`#/markets/${address}`}>market page</a>.
+            Selling, limit orders and curves for this outcome live on its own <a href={`/markets/${address}`}>market page</a>.
           </p>
         </div>
       )}
       {!tradable && (
         <p className="small muted" style={{ marginBottom: 0 }}>
-          Trading has closed. <a href={`#/markets/${address}`}>Open the market</a> to see its book and resolution.
+          Trading has closed. <a href={`/markets/${address}`}>Open the market</a> to see its book and resolution.
         </p>
       )}
       <div className="row between small muted" style={{ marginTop: 'var(--space-2)' }}>

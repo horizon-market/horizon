@@ -121,7 +121,7 @@ export function PublishActions({ publication, side, onReview, canReview, labels 
       {shipped && tx.phase !== 'confirmed' && (
         <Notice kind="warn">
           The Aqua allocation is in place but Horizon has not accepted the order yet, so it cannot fill. Finish the
-          publication below, or cancel it from your <a href="#/holdings?tab=orders">portfolio</a> to take the allocation back.
+          publication below, or cancel it from your <a href="/holdings?tab=orders">portfolio</a> to take the allocation back.
         </Notice>
       )}
       {working && step && (

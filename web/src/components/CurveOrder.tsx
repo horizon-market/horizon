@@ -98,7 +98,7 @@ export function CurveOrder({ market, side, account, book, budgets, onDone }: {
       </dl>
       <Notice kind="info">
         Your curve rests until someone trades against it, and you can cancel it any time from your{' '}
-        <a href="#/holdings">portfolio</a>.
+        <a href="/holdings">portfolio</a>.
         {side.isBuy && ' A resting bid also funds complementary minting for a trader buying the opposite outcome.'}
       </Notice>
       {!account && <Notice kind="info">Connect a wallet to publish a curve from your own account.</Notice>}

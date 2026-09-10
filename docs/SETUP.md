@@ -26,7 +26,7 @@ npm run worker:dev      # in a second terminal: creation and resolution jobs
 ```
 
 The application is then at `http://127.0.0.1:$PORT` (3001 by default). The operator screen is at
-`#/admin` and is deliberately absent from the navigation; AdminJS record inspection is at `/admin`.
+`/operator` and is deliberately absent from the navigation; AdminJS record inspection is at `/admin`.
 Both use `ADMIN_EMAIL` and the password written to `.local/admin-password.txt`.
 
 For frontend work with hot reload, `npm run web:dev` serves Vite on 5173 and proxies `/api`;

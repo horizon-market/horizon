@@ -11,7 +11,7 @@ import { averagePrice, totalCost, type CurvePreview } from '../curve';
 import { priceUsdc, usdc } from '../format';
 
 /**
- * The living design system. Reached at `#/design` and deliberately absent from the
+ * The living design system. Reached at `/design` and deliberately absent from the
  * navigation, like the operator screen. It renders the real components rather than
  * copies of them, so anything that drifts from the tokens shows up here first.
  *
@@ -484,7 +484,7 @@ export function DesignSystem() {
         <h2>Loading and empty</h2>
         <Card title="Loading"><Loading rows={3} label="Loading markets" /></Card>
         <Card title="Empty">
-          <Empty title="No markets are indexed yet"><p>Create the first one from the <a href="#/create">Create market</a> page.</p></Empty>
+          <Empty title="No markets are indexed yet"><p>Create the first one from the <a href="/create">Create market</a> page.</p></Empty>
         </Card>
       </section>
     </div>

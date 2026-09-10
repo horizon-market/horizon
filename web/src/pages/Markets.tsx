@@ -56,7 +56,7 @@ export function Markets() {
       </p>
       {visible.length === 0
         ? <Empty title={entries.length === 0 ? 'No markets are indexed yet' : 'Nothing matches this filter'}>
-            <p>Create the first one from the <a href="#/create">Create market</a> page.</p>
+            <p>Create the first one from the <a href="/create">Create market</a> page.</p>
           </Empty>
         : <div className="grid">
             {visible.map(entry => entry.kind === 'event'
@@ -72,7 +72,7 @@ const depth = (available: string) => `${shares(available)} share${available === 
 function MarketCard({ market }: { market: Market }) {
   const yes = market.liquidity.yes, no = market.liquidity.no;
   return (
-    <a className="card" href={`#/markets/${market.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+    <a className="card" href={`/markets/${market.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
       <div className="row between">
         <Badge kind={STATUS[market.status]}>{market.status === 'RESOLVED' ? `Resolved ${RESULTS[market.result]}` : market.status}</Badge>
         <span className="small muted">{market.status === 'OPEN' ? timeLeft(market.closeAt) : dateTime(market.closeAt)}</span>
@@ -107,7 +107,7 @@ function EventCard({ event }: { event: HorizonEvent }) {
   const shown = event.children.slice(0, 4);
   const hidden = event.children.length - shown.length;
   return (
-    <a className="card event-card" href={`#/events/${event.slug}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+    <a className="card event-card" href={`/events/${event.slug}`} style={{ color: 'inherit', textDecoration: 'none' }}>
       <div className="row between">
         <div className="row">
           <Badge kind={event.stats.open > 0 ? 'open' : 'closed'}>

@@ -52,7 +52,7 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
       <div className="row between">
         {/* A grouped market keeps its own address and its own page; the event is a way back to
             the rest of the group, never a redirect away from a link somebody already holds. */}
-        <a href={group ? `#/events/${group.slug}` : '#/'}>← {group ? group.title : 'All markets'}</a>
+        <a href={group ? `/events/${group.slug}` : '/'}>← {group ? group.title : 'All markets'}</a>
         <button onClick={refresh}>Refresh</button>
       </div>
       {group && <EventContext group={group} />}
@@ -105,7 +105,7 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
                 account={account} position={mine.data?.position} budgets={mine.data?.budgets}
                 onDone={refresh} opening={opening} />
             : <Card title="Trading closed">
-                <p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Portfolio</a>.</p>
+                <p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="/holdings">Portfolio</a>.</p>
                 {/* The ticket is what normally chooses the outcome, so a closed market lends its selector. */}
                 <OutcomeChoice isYes={isYes} onOutcome={setIsYes} />
               </Card>}
@@ -127,7 +127,7 @@ function EventContext({ group }: { group: MarketEventContext }) {
   const exclusive = group.exclusivity === 'EXCLUSIVE';
   const siblings = group.siblings.filter(sibling => sibling.position !== group.position && sibling.marketAddress);
   return (
-    <Card title={<>Part of <a href={`#/events/${group.slug}`}>{group.title}</a></>}
+    <Card title={<>Part of <a href={`/events/${group.slug}`}>{group.title}</a></>}
       actions={<span className="badge closed">{group.outcomeLabel}</span>}>
       <p className="small muted" style={{ marginTop: 0 }}>
         <strong>{exclusive ? 'Exactly one outcome in this group is meant to win.' : 'Grouped for context only.'}</strong>{' '}
@@ -141,7 +141,7 @@ function EventContext({ group }: { group: MarketEventContext }) {
       {siblings.length > 0 && (
         <div className="row" style={{ marginTop: 'var(--space-2)' }}>
           {siblings.map(sibling => (
-            <a key={sibling.position} className="button" href={`#/markets/${sibling.marketAddress}`}>{sibling.outcomeLabel}</a>
+            <a key={sibling.position} className="button" href={`/markets/${sibling.marketAddress}`}>{sibling.outcomeLabel}</a>
           ))}
         </div>
       )}
@@ -232,7 +232,7 @@ function OrderTicket({ market, book, isYes, onOutcome, account, position, budget
       {type === 'curve' && (
         <p className="small muted" style={{ marginTop: '.75rem', marginBottom: 0 }}>
           A curve rests across a range of prices and moves through it as it fills.{' '}
-          <a href="#/curves">How pricing curves work</a>.
+          <a href="/curves">How pricing curves work</a>.
         </p>
       )}
     </Card>
@@ -250,7 +250,7 @@ function YourOrders({ orders, account, onDone }: { orders: MakerCurve[]; account
   return (
     <Card
       title={<>Your orders <span className="count">{live.length}</span></>}
-      actions={<a className="small" href="#/holdings?tab=orders">All orders</a>}
+      actions={<a className="small" href="/holdings?tab=orders">All orders</a>}
     >
       {error && <Notice kind="error">{error}</Notice>}
       <TransactionState state={tx} />
@@ -276,7 +276,7 @@ function YourOrders({ orders, account, onDone }: { orders: MakerCurve[]; account
       {live.length === 0 && <p className="small muted" style={{ margin: 0 }}>Nothing resting here right now.</p>}
       {rest > 0 && (
         <p className="small muted" style={{ marginTop: 'var(--space-2)', marginBottom: 0 }}>
-          {rest} filled or closed order{rest === 1 ? '' : 's'} in this market · <a href="#/holdings?tab=orders">see Portfolio</a>
+          {rest} filled or closed order{rest === 1 ? '' : 's'} in this market · <a href="/holdings?tab=orders">see Portfolio</a>
         </p>
       )}
     </Card>
@@ -333,7 +333,7 @@ function LimitOrder({ market, side, account, book, budgets, onDone }: {
       </dl>
       <Notice kind="info">
         Your order rests until someone trades against it, and you can cancel it any time from your{' '}
-        <a href="#/holdings">portfolio</a>.
+        <a href="/holdings">portfolio</a>.
         {side.isBuy && ' A resting bid also funds complementary minting for a trader buying the opposite outcome.'}
       </Notice>
       {!account && <Notice kind="info">Connect a wallet to place an order from your own account.</Notice>}
@@ -346,4 +346,3 @@ function LimitOrder({ market, side, account, book, budgets, onDone }: {
     </div>
   );
 }
-
