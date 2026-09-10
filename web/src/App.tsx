@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api, type AppConfig } from './api';
 import { navigate, useAsync, useRoute } from './hooks';
-import { ErrorBox, Loading, Logo, Notice } from './components/Ui';
+import { ErrorBox, HelpLink, Loading, Logo, Notice } from './components/Ui';
 import { currentAccount, connect, describeWalletError, walletAvailable } from './wallet';
 import { Markets } from './pages/Markets';
 import { MarketDetail } from './pages/MarketDetail';
@@ -20,8 +20,10 @@ export const useWallet = () => useContext(WalletContext);
 
 // Discovery and creation on the left; what belongs to this account on the right, beside the wallet
 // it belongs to. Publishing a curve is not here: it needs a market in front of it, so it lives in
-// that market's trade ticket. The operator screen, the design-system reference and the curve
-// explainer are deliberately absent too; all three are reached by their path.
+// that market's trade ticket. The curve explainer follows the sections as a help link rather than a
+// third one — curves are what this exchange does differently, and the page that says so was
+// unreachable without scrolling past a market to the footer. The operator screen and the
+// design-system reference stay absent; both are reached by their path.
 const LINKS = [['/', 'Markets'], ['/create', 'Create market']] as const;
 const PERSONAL = ['/holdings', 'Portfolio'] as const;
 // Pages that render from tokens and pure arithmetic, so they stay reviewable without an API.
@@ -51,7 +53,10 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <a className="brand" href="/" aria-label="Horizon home"><Logo /></a>
-        <nav className="nav">{LINKS.map(link)}</nav>
+        <nav className="nav">
+          {LINKS.map(link)}
+          <HelpLink href="/curves" current={active === '/curves'}>How curves work</HelpLink>
+        </nav>
         {/* Everything that belongs to this account sits together, next to the wallet it belongs to. */}
         <div className="nav-end">
           <span className="zero-fee">0% trading fees</span>
@@ -82,7 +87,6 @@ export function App() {
       <footer>
         Horizon settles on Ethereum Sepolia with test USDC. Markets are resolved by a disclosed centralized resolver;
         INVALID pays 0.5 USDC per outcome token. Zero trading fees; market creation is a separate paid service.
-        {' '}<a href="/curves">How pricing curves work</a>.
       </footer>
     </div>
   );

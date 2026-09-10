@@ -20,6 +20,19 @@ export function Card({ title, actions, children }: { title?: ReactNode; actions?
   );
 }
 
+/**
+ * A doorway to an explainer, offered where the concept is met. The circled mark is what makes it
+ * scannable: without one it reads as a citation inside whatever sentence it lands in, which is how
+ * the curve explainer used to sit in the footer disclosure — present, and never seen.
+ */
+export function HelpLink({ href, children, current }: { href: string; children: ReactNode; current?: boolean }) {
+  return (
+    <a className="help-link" href={href} aria-current={current ? 'page' : undefined}>
+      <span className="help-mark" aria-hidden="true">?</span>{children}
+    </a>
+  );
+}
+
 export function Badge({ kind, children }: { kind: 'open' | 'closed' | 'resolved' | 'warn' | 'no'; children: ReactNode }) {
   return <span className={`badge ${kind}`}>{children}</span>;
 }

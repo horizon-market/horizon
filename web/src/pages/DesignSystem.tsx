@@ -3,7 +3,7 @@ import { CurveChart } from '../components/CurveChart';
 import { OrderBook } from '../components/OrderBook';
 import { CurveLiquidity } from '../components/CurveLiquidity';
 import {
-  Address, Badge, Card, Empty, Loading, Logo, Notice, TransactionState, TxLink, ZeroFee,
+  Address, Badge, Card, Empty, HelpLink, Loading, Logo, Notice, TransactionState, TxLink, ZeroFee,
 } from '../components/Ui';
 import type { Curve, OutcomeBook } from '../api';
 import { CurveEditor, type CurveDraft } from '../components/CurveEditor';
@@ -248,6 +248,19 @@ export function DesignSystem() {
       </section>
 
       <section className="ds-section">
+        <h2>Help links</h2>
+        <p className="small muted">
+          One affordance for every explainer, so a reader learns the mark once. It is offered beside the thing it
+          explains — a card's header, a ticket's tab, an empty state — never as the tail of a sentence and never in
+          the footer, where a doorway is indistinguishable from a disclosure.
+        </p>
+        <div className="row" style={{ gap: 'var(--space-5)' }}>
+          <HelpLink href="/curves">How curves work</HelpLink>
+          <HelpLink href="/curves" current>Current page</HelpLink>
+        </div>
+      </section>
+
+      <section className="ds-section">
         <h2>Badges and steps</h2>
         <div className="row">
           <Badge kind="open">OPEN</Badge>
@@ -403,7 +416,15 @@ export function DesignSystem() {
           the legend and the slider reach the same readout without a pointer.
         </p>
         <div style={{ maxWidth: '38rem' }}>
-          <Card title="Curve liquidity · YES" actions={<span className="count">3</span>}>
+          <Card
+            title="Curve liquidity · YES"
+            actions={
+              <span className="row">
+                <span className="count">3</span>
+                <HelpLink href="/curves">How curves work</HelpLink>
+              </span>
+            }
+          >
             <CurveLiquidity curves={RESTING} isYes tradable />
           </Card>
         </div>

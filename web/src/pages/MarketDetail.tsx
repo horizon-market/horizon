@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, type MakerCurve, type Market, type MarketBudgets, type MarketEventContext, type Position } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
-import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState } from '../components/Ui';
+import { Address, Badge, Card, ErrorBox, Fill, HelpLink, Loading, Notice, TransactionState } from '../components/Ui';
 import { isLive, useCancelCurve, usePublishCurve } from '../orders';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
 import { OrderBook } from '../components/OrderBook';
@@ -89,9 +89,16 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
           <Card title={`Limit orders · ${isYes ? 'YES' : 'NO'}`}>
             <OrderBook book={isYes ? detail.data!.book.yes : detail.data!.book.no} isYes={isYes} curves={resting.curves.length} />
           </Card>
+          {/* This chart is where a newcomer first meets a curve, so the explainer is offered here
+              rather than left to be found. */}
           <Card
             title={`Curve liquidity · ${isYes ? 'YES' : 'NO'}`}
-            actions={<span className="count" aria-label={`${resting.curves.length} active curves`}>{resting.curves.length}</span>}
+            actions={
+              <span className="row">
+                <span className="count" aria-label={`${resting.curves.length} active curves`}>{resting.curves.length}</span>
+                <HelpLink href="/curves">How curves work</HelpLink>
+              </span>
+            }
           >
             <p className="small muted" style={{ marginTop: 0 }}>
               Each line is one order repricing as it fills, from where it stands now to the end of what it has left.
@@ -230,10 +237,12 @@ function OrderTicket({ market, book, isYes, onOutcome, account, position, budget
         <button className="primary" style={{ width: '100%', marginTop: '.6rem' }} onClick={() => void wallet.connect()}>Connect wallet</button>
       )}
       {type === 'curve' && (
-        <p className="small muted" style={{ marginTop: '.75rem', marginBottom: 0 }}>
-          A curve rests across a range of prices and moves through it as it fills.{' '}
-          <a href="/curves">How pricing curves work</a>.
-        </p>
+        <div className="stack" style={{ marginTop: '.75rem', gap: 'var(--space-2)' }}>
+          <p className="small muted" style={{ margin: 0 }}>
+            A curve rests across a range of prices and moves through it as it fills.
+          </p>
+          <HelpLink href="/curves">How curves work</HelpLink>
+        </div>
       )}
     </Card>
   );

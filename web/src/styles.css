@@ -379,6 +379,31 @@ td, dl.kv dd,
   font-size: var(--text-xs); font-weight: var(--weight-semibold); white-space: nowrap;
 }
 
+/* An explainer offered at the point of confusion. Muted by default so it never competes with a
+   section link or a card's own data, and accent on hover so it reads as a door, not a footnote.
+   The mark is a `?` in a ring: the one glyph a reader does not have to be taught. */
+.help-link {
+  display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap;
+  font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--muted);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.help-link:hover { color: var(--accent); text-decoration: none; }
+.help-mark {
+  display: inline-grid; place-items: center; flex: none;
+  width: 1.15rem; height: 1.15rem; border-radius: 50%;
+  border: 1px solid var(--border-strong); color: var(--accent);
+  font-size: var(--text-2xs); font-weight: var(--weight-bold); line-height: 1;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+.help-link:hover .help-mark { border-color: var(--accent); background: var(--accent-soft); }
+/* In the top bar it wears the nav's own metrics and rhythm: the ring is what tells a reference
+   apart from a section, so it needs no extra gap — which would read as a stray indent on the
+   narrow widths where the nav wraps this item onto its own line. */
+.nav .help-link { padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); font-size: inherit; }
+.nav .help-link:hover { background: var(--surface-2); }
+.nav .help-link[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.nav .help-link[aria-current="page"] .help-mark { border-color: var(--accent-border); }
+
 main { flex: 1; width: 100%; max-width: var(--container); margin: 0 auto; padding: var(--space-5) var(--space-4) var(--space-12); }
 footer { border-top: 1px solid var(--border); color: var(--muted); font-size: var(--text-sm); padding: var(--space-4); text-align: center; }
 

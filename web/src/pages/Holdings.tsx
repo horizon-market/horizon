@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api, ApiError, type CreationSummary, type HorizonEvent, type MakerCurve, type Position } from '../api';
 import { navigate, useAsync, type Async } from '../hooks';
 import { useWallet } from '../App';
-import { Badge, Card, Empty, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
+import { Badge, Card, Empty, ErrorBox, Fill, HelpLink, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
 import { CREATION_BADGE, CREATION_LABEL, activateCreation, creationToken, isFinished } from '../creations';
 import { ORDER_STATES, orderState, useCancelCurve, type OrderState } from '../orders';
 import { cumulative, type CurveShape } from '../curve';
@@ -289,9 +289,14 @@ function Orders({ published, account, events, onDone }: { published: MakerCurve[
       <Empty title="No orders yet">
         <p className="small">
           A limit order buys or sells at your own price and waits; a curve moves its price as it fills. Both are
-          published from a market's trade ticket — <a href="/curves">how pricing curves work</a>.
+          published from a market's trade ticket.
         </p>
-        <a className="button" href="/">Browse markets</a>
+        {/* Nothing to read here yet, so the two things worth doing next stand side by side: go find a
+            market, or learn what the second order type is before publishing one. */}
+        <div className="row" style={{ justifyContent: 'center', gap: 'var(--space-4)' }}>
+          <a className="button" href="/">Browse markets</a>
+          <HelpLink href="/curves">How curves work</HelpLink>
+        </div>
       </Empty>
     );
   }
