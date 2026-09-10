@@ -27,27 +27,60 @@ if (!['127.0.0.1', 'localhost'].includes(target.hostname) || target.pathname !==
   throw new Error('Integration tests require a dedicated localhost database named horizon_test.');
 }
 
-async function until(check: () => Promise<boolean>, description: string) {
+/**
+ * The spawned worker reads its configuration from the environment, so this file owns that
+ * environment: whether a developer happens to have a .env file must not decide whether the test
+ * passes. The worker never serves HTTP, but loadConfig requires the admin surface either way.
+ */
+const workerEnv = {
+  NODE_ENV: 'test', ADMIN_EMAIL: 'worker-test@horizon.local',
+  ADMIN_PASSWORD_HASH: await hashPassword(randomUUID()), SESSION_SECRET: randomUUID() + randomUUID(),
+  // Durability is what is under test here; a configured Graph would only add sweeps and a ticker.
+  MARKET_SYNC_ENABLED: 'false',
+};
+
+type Worker = { child: ChildProcess; stopping: boolean; exit?: string; tail: () => string; failure: () => string | undefined };
+
+/** Database errors carry credentials, so worker output is only ever surfaced redacted. */
+function redact(text: string): string {
+  return text.replaceAll(url!, '[database url]').replace(/postgres(ql)?:\/\/\S+/g, '[database url]');
+}
+
+function worker(): Worker {
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/worker.ts'], {
+    env: { ...process.env, ...workerEnv, DATABASE_URL: url }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  // Drain the pipes, keeping only the tail: a worker that dies at startup must be able to say why
+  // instead of presenting as a bare timeout.
+  let log = '';
+  const collect = (chunk: Buffer) => { log = (log + chunk.toString()).slice(-2_000); };
+  child.stdout?.on('data', collect); child.stderr?.on('data', collect);
+  const handle: Worker = {
+    child, stopping: false,
+    tail: () => redact(log).trim(),
+    failure: () => handle.stopping || !handle.exit ? undefined : `worker exited with ${handle.exit}: ${handle.tail() || 'no output'}`,
+  };
+  child.once('exit', (code, signal) => { handle.exit = code === null ? `signal ${signal}` : `code ${code}`; });
+  return handle;
+}
+
+async function until(check: () => Promise<boolean>, description: string, running?: Worker) {
   const end = Date.now() + 25_000;
   while (Date.now() < end) {
     if (await check()) return;
+    const failure = running?.failure();
+    if (failure) throw new Error(`${description}: ${failure}`);
     await delay(200);
   }
-  throw new Error(`Timed out: ${description}`);
+  throw new Error(`Timed out: ${description}${running ? `. Worker output: ${running.tail() || 'none'}` : ''}`);
 }
-function worker(): ChildProcess {
-  const child = spawn(process.execPath, ['--import', 'tsx', 'src/worker.ts'], {
-    env: { ...process.env, DATABASE_URL: url }, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  // Drain pipes without printing possible database errors containing credentials.
-  child.stdout?.resume(); child.stderr?.resume();
-  return child;
-}
-async function stop(child: ChildProcess) {
-  if (child.exitCode !== null) return;
-  const exited = once(child, 'exit');
-  child.kill('SIGTERM');
-  const force = setTimeout(() => child.kill('SIGKILL'), 12_000).unref();
+
+async function stop(running: Worker) {
+  running.stopping = true;
+  if (running.exit) return;
+  const exited = once(running.child, 'exit');
+  running.child.kill('SIGTERM');
+  const force = setTimeout(() => running.child.kill('SIGKILL'), 12_000).unref();
   await exited;
   clearTimeout(force);
 }
@@ -98,13 +131,13 @@ test('a separate worker drains persisted jobs after startup/restart; duplicate d
   await producer.stop();
   let child = worker();
   try {
-    await until(async () => !!await db.jobRun.findUnique({ where: { id: probeId } }), 'job persisted while no worker ran');
+    await until(async () => !!await db.jobRun.findUnique({ where: { id: probeId } }), 'job persisted while no worker ran', child);
     await stop(child);
     const nextProducer = await startQueue(url!);
     const duplicate = await enqueueProbe(nextProducer, { probeId, label: 'Duplicate delivery' });
     child = worker();
     try {
-      await until(async () => (await nextProducer.getJobById(PROBE_QUEUE, duplicate))?.state === 'completed', 'duplicate after worker restart');
+      await until(async () => (await nextProducer.getJobById(PROBE_QUEUE, duplicate))?.state === 'completed', 'duplicate after worker restart', child);
     } finally { await nextProducer.stop(); }
     assert.equal(await db.jobRun.count({ where: { id: probeId } }), 1);
   } finally {
