@@ -106,6 +106,13 @@ function MarketCard({ market }: { market: Market }) {
 function EventCard({ event }: { event: HorizonEvent }) {
   const shown = event.children.slice(0, 4);
   const hidden = event.children.length - shown.length;
+  const markets = event.children.flatMap(child => child.market ? [child.market] : []);
+  const openMarkets = markets.filter(market => market.status === 'OPEN');
+  // Use the deployed Horizon deadlines, which can differ from the source event's end date.
+  const closeAt = openMarkets.length > 0
+    ? Math.min(...openMarkets.map(market => market.closeAt))
+    : markets.length > 0 ? Math.max(...markets.map(market => market.closeAt)) : null;
+  const staggered = new Set(openMarkets.map(market => market.closeAt)).size > 1;
   return (
     <a className="card event-card" href={`/events/${event.slug}`} style={{ color: 'inherit', textDecoration: 'none' }}>
       <div className="row between">
@@ -115,9 +122,14 @@ function EventCard({ event }: { event: HorizonEvent }) {
           </Badge>
           {event.exclusivity === 'EXCLUSIVE' && <span className="badge warn" title={event.exclusivityNote}>One winner</span>}
         </div>
-        <span className="small muted">
-          {event.source.provider === 'horizon' ? event.category || 'Event' : `via ${event.source.provider}`}
-        </span>
+        <div className="small muted" style={{ textAlign: 'right' }}>
+          {closeAt !== null && <div title={`${staggered ? 'Next market closes' : 'Trading closes'} ${dateTime(closeAt)}`}>
+            {openMarkets.length > 0
+              ? `${staggered ? 'Next close: ' : ''}${timeLeft(closeAt)}`
+              : dateTime(closeAt)}
+          </div>}
+          <div>{event.source.provider === 'horizon' ? event.category || 'Event' : `via ${event.source.provider}`}</div>
+        </div>
       </div>
       <h3 style={{ marginTop: '.6rem' }}>{event.title}</h3>
       <ul className="event-outcomes">
