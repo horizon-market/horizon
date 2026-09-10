@@ -37,7 +37,11 @@ export function tradingRoutes(config?: TradingConfig, marketService?: MarketServ
   const guard = <T>(res: Parameters<Parameters<Router['get']>[1]>[1], run: () => Promise<T>) => run().then(
     value => res.json(serialize(value)),
     error => {
-      if (error instanceof MarketError) { res.status(error.message === 'unknown_market' ? 404 : 422).json({ error: error.message }); return; }
+      if (error instanceof MarketError) {
+        const status = error.message === 'unknown_market' ? 404 : error.message === 'order_budget_unavailable' ? 503 : 422;
+        res.status(status).json(serialize({ error: error.message, ...error.details }));
+        return;
+      }
       if (error instanceof GraphError) { res.status(503).json({ error: 'graph_unavailable' }); return; }
       console.error('Market request failed; internal details withheld');
       res.status(503).json({ error: 'market_data_unavailable' });
@@ -89,6 +93,18 @@ export function tradingRoutes(config?: TradingConfig, marketService?: MarketServ
     const account = address.safeParse(req.params.account);
     if (!account.success) { res.status(400).json({ error: 'invalid_account' }); return; }
     await guard(res, () => markets.positions(account.data));
+  });
+  /**
+   * What this maker may still commit in this market, per funding asset. The numbers come from the
+   * router's own commitment registry at one block, so they neither depend on the indexer nor
+   * reserve anything: they describe the wallet as it stands, and a fill elsewhere can move them.
+   */
+  router.get('/markets/:market/budgets/:maker', reads, async (req, res) => {
+    if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
+    const market = address.safeParse(req.params.market), maker = address.safeParse(req.params.maker);
+    if (!market.success) { res.status(400).json({ error: 'invalid_market' }); return; }
+    if (!maker.success) { res.status(400).json({ error: 'invalid_account' }); return; }
+    await guard(res, () => markets.marketBudgets(maker.data, market.data));
   });
   router.get('/curves/:maker', reads, async (req, res) => {
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }

@@ -79,6 +79,8 @@ const MESSAGES: Record<string, string> = {
   payment_replayed: 'That payment authorization was already used.',
   payment_receiver_not_configured: 'No Hedera receiver account is configured on this API.',
   insufficient_outcome_balance: 'The account does not hold that many outcome tokens.',
+  order_budget_unavailable: 'Horizon could not read this market\u2019s order budget, so a new order cannot be prepared. '
+    + 'Publishing is paused rather than risking orders that commit the same funds twice.',
   origin_not_allowed: 'This browser origin is not allowed to call the API.',
   // Events, groups and imports.
   events_not_configured: 'Event grouping is not configured on this API.',

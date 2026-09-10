@@ -2,9 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createPublicClient, createWalletClient, http, keccak256, getContractAddress, parseEther, type Abi, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
-import { routerAbi, routeAbi, registryAbi } from '../src/trading/abi.js';
+import { routerAbi, routeAbi, orderBudgetAbi, registryAbi } from '../src/trading/abi.js';
 
-type Deployment = { chainId: number; owner: Address; aqua: Address; usdc: Address; startBlock?: string; registry?: Address; router?: Address; executor?: Address; transactions: Record<string, Hex>; pending?: { name: string; address: Address; nonce: number; hash?: Hex } };
+type Deployment = { chainId: number; owner: Address; aqua: Address; usdc: Address; startBlock?: string; registry?: Address; router?: Address; executor?: Address; orderBudget?: Address; transactions: Record<string, Hex>; pending?: { name: string; address: Address; nonce: number; hash?: Hex } };
 const path = 'deployments/sepolia.json';
 async function main() {
   if (!process.argv.includes('--broadcast')) throw new Error('Pass --broadcast to deploy to Sepolia');
@@ -65,13 +65,19 @@ async function main() {
   const registry = await deploy('MarketRegistry', 'registry', [state.usdc, account.address]);
   const router = await deploy('HorizonSwapVM', 'router', [state.aqua, registry, account.address]);
   const executor = await deploy('RouteExecutor', 'executor', [router]);
-  const [actualUSDC, actualRegistry, actualAqua, actualRouter] = await Promise.all([
+  const [actualUSDC, actualRegistry, actualAqua, actualRouter, orderBudget] = await Promise.all([
     client.readContract({ address: registry, abi: registryAbi, functionName: 'usdc' }),
     client.readContract({ address: router, abi: routerAbi, functionName: 'registry' }),
     client.readContract({ address: router, abi: routerAbi, functionName: 'AQUA' }),
     client.readContract({ address: executor, abi: routeAbi, functionName: 'router' }),
+    // The router deploys its own order-budget ledger, so this is a record, never a configuration.
+    client.readContract({ address: router, abi: routerAbi, functionName: 'budget' }),
   ]);
   if ([actualUSDC, actualRegistry, actualAqua, actualRouter].map(x => x.toLowerCase()).join() !== [state.usdc, registry, state.aqua, router].map(x => x.toLowerCase()).join()) throw new Error('Deployed wiring mismatch');
+  const ledgerApp = await client.readContract({ address: orderBudget, abi: orderBudgetAbi, functionName: 'app' });
+  if (ledgerApp.toLowerCase() !== router.toLowerCase()) throw new Error('Order budget is not owned by this router');
+  state.orderBudget = orderBudget; await save();
+  console.log(`OrderBudget: ${orderBudget}`);
   let localEnv = await readFile('.env', 'utf8');
   for (const [key, value] of Object.entries({ HORIZON_REGISTRY_ADDRESS: registry, HORIZON_ROUTER_ADDRESS: router, HORIZON_EXECUTOR_ADDRESS: executor })) {
     const line = new RegExp(`^${key}=.*$`, 'm'); localEnv = line.test(localEnv) ? localEnv.replace(line, `${key}=${value}`) : `${localEnv.trimEnd()}\n${key}=${value}\n`;

@@ -43,12 +43,13 @@ const POSITION_FILTERS: [PositionState | 'all', string][] = [
   ['all', 'All'], ['open', 'Open'], ['awaiting', 'Awaiting result'], ['redeemable', 'Redeemable'], ['settled', 'No payout'],
 ];
 const ORDER_FILTERS: [OrderState | 'all', string][] = [
-  ['open', 'Open'], ['filled', 'Filled'], ['closed', 'Closed'], ['all', 'All'],
+  ['open', 'Open'], ['unpublished', 'Not published'], ['filled', 'Filled'], ['closed', 'Closed'], ['all', 'All'],
 ];
 
 // Redeemable first, then whatever still needs watching, then the finished rows.
 const POSITION_ORDER: PositionState[] = ['redeemable', 'open', 'awaiting', 'settled'];
-const ORDER_ORDER: OrderState[] = ['open', 'filled', 'closed'];
+// An unpublished order holds funds without resting, so it sits with the open ones and not in history.
+const ORDER_ORDER: OrderState[] = ['unpublished', 'open', 'filled', 'closed'];
 
 function positionState(position: Position): PositionState {
   if (position.status === 'OPEN') return 'open';
@@ -326,6 +327,9 @@ function Orders({ published, account, events, onDone }: { published: MakerCurve[
                         <td>
                           <span className={`badge ${ORDER_STATES[state].badge}`}>{ORDER_STATES[state].label}</span>
                           {partly && <div className="small muted">partly filled</div>}
+                          {state === 'unpublished' && (
+                            <div className="small muted">Funds are allocated in Aqua but Horizon never accepted this order, so it cannot fill. Cancel it to take the allocation back.</div>
+                          )}
                         </td>
                         <td>{curve.cancellable && (
                           <button disabled={busy !== undefined} onClick={() => void cancel(curve)}>

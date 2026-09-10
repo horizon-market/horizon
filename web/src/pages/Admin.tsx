@@ -249,7 +249,13 @@ function Activity({ activity }: { activity: ReturnType<typeof useAsync<AdminActi
                     <td className="small">{SHAPES[curve.shape]}</td>
                     <td className="small">{shares(curve.filled)} / {shares(curve.maxShares)}</td>
                     <td className="small">{shares(curve.remaining)}</td>
-                    <td><span className={`badge ${curve.active ? 'open' : 'closed'}`}>{curve.active ? 'active' : 'inactive'}</span></td>
+                    <td>
+                      {/* Shipped to Aqua is not the same as executable: an order the router never
+                          admitted holds its maker's allocation but can never fill. */}
+                      <span className={`badge ${curve.active && curve.admitted ? 'open' : curve.active ? 'warn' : 'closed'}`}>
+                        {curve.active ? (curve.admitted ? 'active' : 'not published') : 'inactive'}
+                      </span>
+                    </td>
                     <td className="small">{curve.question}</td>
                   </tr>
                 ))}

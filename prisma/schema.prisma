@@ -300,13 +300,16 @@ model CurveProjection {
   maxShares     String
   filled        String
   salt          String
+  // Shipped to Aqua and not docked.
   active        Boolean
+  // Admitted by the Horizon router, which checked its market budget. Only an admitted order fills.
+  admitted      Boolean          @default(false)
   publishedAt   DateTime
   indexedBlock  Int
   syncedAt      DateTime         @default(now())
 
   @@index([maker, publishedAt])
-  @@index([marketAddress, active])
+  @@index([marketAddress, active, admitted])
 }
 
 // One row per projection, recording the Graph block the mirror is complete

@@ -183,6 +183,42 @@ The demo prints a local EVM trace of Aqua authorization, a 0.60/0.40 match, full
 
 The macOS sandbox prevented PostgreSQL shared-memory initialization and caused Foundry's OS proxy lookup to crash; those commands succeeded outside the sandbox. These were environment limitations, not passing results inferred from failed tests.
 
+## Per-market order budgets: required redeployment
+
+The order-budget rule is enforced on chain by `OrderBudget`, a ledger that `HorizonSwapVM` deploys
+and owns, and `HorizonSwapVM` refuses to fill any order it has not admitted. **This is a contract
+change, so it takes a new router.** Until it is deployed and wired, the API refuses to prepare curve
+publications with `order_budget_unavailable` (HTTP 503) rather than reporting an unknown budget as an
+empty one. That refusal is deliberate: a silent fallback would permit exactly what the rule prevents.
+
+Nothing here has been broadcast. The deployment step is:
+
+```sh
+npm run contracts:test          # 54 tests, including test/OrderBudget.t.sol
+npm run test:routes             # both Anvil suites, including the enforcement boundary
+npm run deploy:phase2           # deploys MarketRegistry, HorizonSwapVM and RouteExecutor
+npm run subgraph:prepare && npm run subgraph:codegen && npm run subgraph:deploy
+npm run db:migrate              # adds CurveProjection.admitted
+```
+
+`deploy:phase2` reads `router.budget()`, checks the ledger names that router as its `app`, and
+records the address in `deployments/sepolia.json` as `orderBudget`. Nothing configures it: the
+router deploys its own ledger, so the two cannot disagree and no environment variable can point at
+the wrong one. `RouteExecutor` holds the router immutably and is redeployed with it.
+
+Notes for whoever runs it:
+
+- `HorizonSwapVM` is **23,514 bytes**, 1,062 under the EIP-170 limit. Check
+  `forge build --root contracts --sizes` before adding to it.
+- Curves published to the previous router stay on the previous router. They are not migrated, and
+  the new subgraph indexes only orders admitted to the new one.
+- Publication is now two transactions for the maker: `Aqua.ship`, then
+  `HorizonSwapVM.admitCurve`. The frontend runs both and, if the second fails, resumes at the
+  admission rather than shipping a second allocation.
+- The subgraph adds `Strategy.admitted` and derives it from the router's `StrategyAdmitted` event.
+  Discovery queries filter `active: true, admitted: true`, so re-indexing from `startBlock` is
+  required — a partially indexed subgraph would show no depth rather than wrong depth.
+
 ## Sponsor readiness
 
 ```sh

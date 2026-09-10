@@ -8,6 +8,27 @@ export const routerAbi = parseAbi([
   'function filledShares(bytes32) view returns (uint256)',
   'function registry() view returns (address)',
   'function AQUA() view returns (address)',
+  // Publication. `admitCurve` is the step that enforces the market's order budget, and an order
+  // this router has not admitted never fills, however it reached Aqua.
+  `function admitCurve(${curveTuple} s) returns (bytes32)`,
+  'function budget() view returns (address)',
+  'function releaseClosed(address maker,address market) returns (uint256)',
+]);
+
+/**
+ * The per-market order ledger the router owns. It is a separate contract, deployed by the router:
+ * read its address from `router.budget()` rather than configuring it, so the two can never disagree.
+ */
+export const orderBudgetAbi = parseAbi([
+  'function isAdmitted(bytes32 orderHash) view returns (bool)',
+  'function openOrders(address maker,address market) view returns (bytes32[])',
+  'function commitmentOf(bytes32 orderHash) view returns ((address token,uint88 owed,uint8 flags))',
+  'function spendable(address maker,address token) view returns (uint256)',
+  'function committed(address maker,address market,address token) view returns (uint256,uint256)',
+  'function marketBudget(address maker,address market,address token) view returns (uint256,uint256,uint256,uint256)',
+  'function remainingCommitment(address maker,bytes32 orderHash) view returns (uint256)',
+  'function MAX_OPEN_ORDERS() view returns (uint256)',
+  'function app() view returns (address)',
 ]);
 export const routeAbi = parseAbi([
   `function execute((address market,bool isYes,bool isBuy,uint256 shares,uint256 limit,address recipient,uint40 deadline) request,(address maker,${curveTuple} strategy,uint256 shares,uint256 expectedFilled)[] legs) returns (uint256)`,
@@ -30,6 +51,7 @@ export const marketAbi = parseAbi([
 ]);
 export const aquaAbi = parseAbi([
   'function safeBalances(address maker,address app,bytes32 strategyHash,address token0,address token1) view returns (uint256,uint256)',
+  'function rawBalances(address maker,address app,bytes32 strategyHash,address token) view returns (uint248,uint8)',
   'function ship(address app,bytes strategy,address[] tokens,uint256[] amounts) returns (bytes32)',
   'function dock(address app,bytes32 strategyHash,address[] tokens)',
 ]);

@@ -180,7 +180,7 @@ contract ComplementaryMatchTest is TestBase {
         HorizonSwapVM.BuyStrategy memory other = strategy;
         other.market = address(second);
         ISwapVM.Order memory order = ship(other);
-        (uint256 spendable,, uint256 available,) = router.marketBudget(MAKER, address(second), address(usdc));
+        (uint256 spendable,, uint256 available,) = router.budget().marketBudget(MAKER, address(second), address(usdc));
         eq(spendable, 100e6);
         eq(available, 96e6);
         vm.prank(MAKER);
@@ -188,7 +188,7 @@ contract ComplementaryMatchTest is TestBase {
         // The wallet now funds one fill. The second market is over budget and admits nothing more,
         // but its already-published order is still counted, not quietly forgotten.
         (uint256 nowSpendable, uint256 nowCommitted, uint256 nowAvailable,) =
-            router.marketBudget(MAKER, address(second), address(usdc));
+            router.budget().marketBudget(MAKER, address(second), address(usdc));
         eq(nowSpendable, 400_000);
         eq(nowCommitted, 4e6);
         eq(nowAvailable, 0);

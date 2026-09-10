@@ -15,7 +15,7 @@ const market = (overrides: Partial<ProjectedMarket> = {}): ProjectedMarket => ({
 const curve = (overrides: Partial<ProjectedCurve> = {}): ProjectedCurve => ({
   id: `0x${'a'.repeat(64)}` as Hex, market: market().id, maker: '0x00000000000000000000000000000000000000D4' as Address,
   flags: 6, startPrice: 400_000, endPrice: 200_000, maxShares: 10n ** 15n, filled: 123_456_789n,
-  salt: `0x${'b'.repeat(64)}` as Hex, active: true, publishedAt: 1788904800, ...overrides,
+  salt: `0x${'b'.repeat(64)}` as Hex, active: true, admitted: true, publishedAt: 1788904800, ...overrides,
 });
 const syncedAt = new Date('2026-09-09T12:00:00.000Z');
 

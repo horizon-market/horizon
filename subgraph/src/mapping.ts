@@ -2,7 +2,7 @@ import { Address, BigInt, Bytes, DataSourceContext, dataSource } from '@graphpro
 import { Market, Strategy, Fill, Route } from '../generated/schema';
 import { MarketCreated } from '../generated/Registry/MarketRegistry';
 import { Shipped, Docked } from '../generated/Aqua/Aqua';
-import { HorizonSwapVM, CurveFilled } from '../generated/Router/HorizonSwapVM';
+import { HorizonSwapVM, CurveFilled, StrategyAdmitted } from '../generated/Router/HorizonSwapVM';
 import { RouteExecuted } from '../generated/Executor/RouteExecutor';
 import { CollateralChanged, MarketResolved } from '../generated/templates/BinaryMarket/BinaryMarket';
 import { BinaryMarket } from '../generated/templates';
@@ -26,12 +26,12 @@ export function handleShip(event: Shipped): void {
   let s = new Strategy(event.params.strategyHash);
   s.market = curve.market; s.maker = event.params.maker; s.flags = curve.flags;
   s.startPrice = curve.startPrice; s.endPrice = curve.endPrice; s.maxShares = curve.maxShares; s.salt = curve.salt;
-  s.filled = BigInt.zero(); s.active = true; s.publishedAt = event.block.timestamp; s.save();
+  s.filled = BigInt.zero(); s.active = true; s.admitted = false; s.publishedAt = event.block.timestamp; s.save();
 }
-export function handleDock(event: Docked): void {
-  if (!event.params.app.equals(Address.fromString(dataSource.context().getString('router')))) return;
-  let s = Strategy.load(event.params.strategyHash); if (s == null) return;
-  s.active = false; s.save();
+/** Aqua publication alone is not executable liquidity; the router's admission is what makes it so. */
+export function handleAdmit(event: StrategyAdmitted): void {
+  let s = Strategy.load(event.params.orderHash); if (s == null) return;
+  s.admitted = true; s.admittedAt = event.block.timestamp; s.save();
 }
 export function handleFill(event: CurveFilled): void {
   let s = Strategy.load(event.params.orderHash); if (s == null) return;

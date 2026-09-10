@@ -14,7 +14,9 @@ const router = deployment.router ?? process.env.HORIZON_ROUTER_ADDRESS ?? zero;
 const sources = [
   { name: 'Registry', abi: 'MarketRegistry', address: deployment.registry ?? zero, event: 'MarketCreated(indexed bytes32,indexed address,indexed address,address,address,uint40,string,string,string)', handler: 'handleMarket' },
   { name: 'Aqua', abi: 'Aqua', address: deployment.aqua ?? process.env.AQUA_ADDRESS ?? zero, event: 'Shipped(address,address,bytes32,bytes)', handler: 'handleShip', extra: '        - event: Docked(address,address,bytes32)\n          handler: handleDock\n' },
-  { name: 'Router', abi: 'HorizonSwapVM', address: router, event: 'CurveFilled(indexed bytes32,indexed address,indexed address,uint256,uint256,uint256)', handler: 'handleFill' },
+  { name: 'Router', abi: 'HorizonSwapVM', address: router, event: 'CurveFilled(indexed bytes32,indexed address,indexed address,uint256,uint256,uint256)', handler: 'handleFill',
+    // Admission is what makes a shipped order executable, so discovery follows it and not `Shipped`.
+    extra: '        - event: StrategyAdmitted(indexed bytes32,indexed address,indexed address,address,uint256,uint256,uint256)\n          handler: handleAdmit\n' },
   { name: 'Executor', abi: 'RouteExecutor', address: deployment.executor ?? zero, event: 'RouteExecuted(indexed address,indexed address,indexed address,bool,bool,uint256,uint256,uint256)', handler: 'handleRoute' },
 ];
 const abis = names.map(n => `        - name: ${n}\n          file: ./abis/${n}.json`).join('\n');

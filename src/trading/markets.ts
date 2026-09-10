@@ -2,15 +2,26 @@ import { createPublicClient, http, erc20Abi, encodeAbiParameters, parseAbiParame
 import { sepolia } from 'viem/chains';
 import { GraphProvider, type IndexedMarket, type IndexedSnapshot } from './graph.js';
 import type { MarketProjectionStore } from './projection.js';
-import { cumulative, type Curve } from './math.js';
+import type { Curve } from './math.js';
+import { budgetOf, checkCapacity, obligationOf, type Budget, type OpenOrder } from './budget.js';
 import { buildBook, describeCurves, summarize, type CurveDescription, type MarketLiquidity } from './liquidity.js';
-import { aquaAbi, marketAbi, registryAbi, routerAbi } from './abi.js';
+import { aquaAbi, marketAbi, orderBudgetAbi, registryAbi, routerAbi } from './abi.js';
 import type { TradingConfig } from './service.js';
 
-export class MarketError extends Error {}
+/** `details` travels with the API error so a refusal can state the amounts it was decided on. */
+export class MarketError extends Error {
+  constructor(message: string, readonly details?: Record<string, unknown>) { super(message); }
+}
 export const RESULTS = ['UNRESOLVED', 'YES', 'NO', 'INVALID'] as const;
 export type PublishInput = { maker: Address; market: Address; isYes: boolean; isBuy: boolean; startPrice: number; endPrice: number; shares: bigint; shape: number; salt?: Hex };
 export type RedeemInput = { account: Address; market: Address; yesShares: bigint; noShares: bigint; recipient: Address };
+
+/** How an order's funding is described to a maker: the asset, the budget, and what is left. */
+export type FundingBudget = Budget & { asset: 'USDC' | 'YES' | 'NO'; decimals: number };
+export type MarketBudgets = {
+  block: number; market: Address; maker: Address; spender: Address; marketOpen: boolean;
+  usdc: FundingBudget; yes: FundingBudget; no: FundingBudget;
+};
 
 export type MarketSummary = Omit<IndexedMarket, 'curves'> & {
   liquidity: MarketLiquidity; status: 'OPEN' | 'CLOSED' | 'RESOLVED'; curves: CurveDescription[];
@@ -29,6 +40,7 @@ const status = (market: IndexedMarket, now: number): MarketSummary['status'] =>
 export class MarketService {
   readonly graph: GraphProvider;
   readonly client;
+  private ledger?: Promise<Address>;
   constructor(readonly config: TradingConfig, private projection?: MarketProjectionStore) {
     this.graph = new GraphProvider(config.graph, config.graphKey);
     this.client = createPublicClient({ chain: sepolia, transport: http(config.rpc, { timeout: 15_000, retryCount: 1 }) });
@@ -120,8 +132,10 @@ export class MarketService {
   }
 
   /**
-   * A maker's own published curves. Indexed state is enough to list and cancel them; a fill still
-   * depends on the wallet balance the curve's Aqua allocation draws on, which is shared.
+   * A maker's own published curves, including any that were shipped to Aqua but never admitted by
+   * the router. Those cannot fill and hold no budget, but they are still the maker's allocation and
+   * are still cancellable from here, so they are listed rather than hidden. A fill of an admitted
+   * order still depends on the wallet balance its Aqua allocation draws on, which is shared.
    */
   async curvesFor(maker: Address) {
     const snapshot = await this.read(() => this.projection!.curvesByMaker(maker), () => this.graph.curvesByMaker(maker));
@@ -136,12 +150,104 @@ export class MarketService {
         // Equal endpoints never move with the fill, which is what makes them a limit order.
         isLimit: curve.startPrice === curve.endPrice,
         maxShares: curve.maxShares.toString(), filled: curve.filled.toString(), remaining: remaining.toString(),
-        active: curve.active, publishedAt: curve.publishedAt, closeAt: curve.closeAt,
+        active: curve.active, admitted: curve.admitted, publishedAt: curve.publishedAt, closeAt: curve.closeAt,
         outcomeToken: isYes ? curve.yesToken : curve.noToken,
         marketStatus: curve.result !== 0 ? 'RESOLVED' : curve.closeAt <= now ? 'CLOSED' : 'OPEN',
+        // Aqua holds the allocation either way, so an unadmitted order can still be withdrawn.
         cancellable: curve.active && remaining > 0n,
+        executable: curve.active && curve.admitted && remaining > 0n,
       };
     }) };
+  }
+
+  /**
+   * Every order this maker still has admitted in one market, read from the router's own ledger
+   * rather than from the indexer. The ledger is the complete list by construction — an order the
+   * router has not admitted can never fill — so a stale or unavailable Graph can neither hide an
+   * outstanding commitment nor invent one.
+   */
+  private async openOrders(maker: Address, market: Address, blockNumber: bigint): Promise<OpenOrder[]> {
+    const ledger = { address: await this.orderBudget(), abi: orderBudgetAbi, blockNumber } as const;
+    const hashes = await this.client.readContract({ ...ledger, functionName: 'openOrders', args: [maker, market] }) as Hex[];
+    if (hashes.length === 0) return [];
+    type Commitment = { token: Address; owed: bigint; flags: number };
+    // Every read is pinned to one block, so the figures below can be compared with each other and
+    // with the wallet. The ledger caps a maker at sixteen open orders per market, which bounds this.
+    const commitments = await Promise.all(hashes.map(async orderHash => {
+      const [commitment, filled] = await Promise.all([
+        this.client.readContract({ ...ledger, functionName: 'commitmentOf', args: [orderHash] }) as Promise<Commitment>,
+        this.client.readContract({ address: this.config.router, abi: routerAbi, functionName: 'filledShares', args: [orderHash], blockNumber }) as Promise<bigint>,
+      ]);
+      return { orderHash, filled, ...commitment };
+    }));
+    // Cancellation lives in Aqua's balance for the order, read at the same block as everything else.
+    return Promise.all(commitments.map(async order => {
+      const [allocation, tokensCount] = await this.client.readContract({ address: this.config.aqua, abi: aquaAbi,
+        functionName: 'rawBalances', args: [maker, this.config.router, order.orderHash, order.token], blockNumber }) as readonly [bigint, number];
+      return { ...order, allocation, tokensCount };
+    }));
+  }
+
+  /**
+   * The router deploys its own order ledger and exposes the address, so the two can never disagree
+   * and no separate configuration can point at the wrong one. Cached, and re-resolved after a
+   * failure rather than remembered as broken.
+   */
+  private orderBudget(): Promise<Address> {
+    this.ledger ??= (this.client.readContract({ address: this.config.router, abi: routerAbi, functionName: 'budget' }) as Promise<Address>)
+      .catch(error => { this.ledger = undefined; throw error; });
+    return this.ledger;
+  }
+
+  /**
+   * Refuses rather than assumes. A router without an order ledger, or an RPC that will not answer,
+   * means the budget is unknown — and an unknown budget must not be reported as an empty one,
+   * which would silently permit exactly what this rule exists to prevent.
+   */
+  private async commitments(maker: Address, market: Address, blockNumber: bigint): Promise<OpenOrder[]> {
+    try {
+      return await this.openOrders(maker, market, blockNumber);
+    } catch {
+      throw new MarketError('order_budget_unavailable', {
+        router: this.config.router,
+        reason: 'The router did not answer its order-budget ledger. Publication is refused while the '
+          + 'per-market commitments of this wallet cannot be established.',
+      });
+    }
+  }
+
+  private static describe(budget: Budget, asset: FundingBudget['asset']): FundingBudget {
+    return { ...budget, asset, decimals: 6 };
+  }
+
+  /**
+   * What one maker may still commit in one market, per funding asset. USDC covers both outcomes
+   * because a BUY spends USDC whichever side it names; each outcome token carries its own
+   * inventory. Every figure is read at one block so they can be compared with each other.
+   */
+  async marketBudgets(maker: Address, market: Address): Promise<MarketBudgets> {
+    // Never the cached head: a budget read a few seconds behind a fill is exactly the stale check
+    // this rule exists to avoid relying on.
+    const blockNumber = await this.client.getBlockNumber({ cacheTime: 0 });
+    const [registered, isOpen, yesToken, noToken] = await Promise.all([
+      this.client.readContract({ address: this.config.registry, abi: registryAbi, functionName: 'isMarket', args: [market], blockNumber }),
+      this.client.readContract({ address: market, abi: marketAbi, functionName: 'isOpen', blockNumber }),
+      this.client.readContract({ address: market, abi: marketAbi, functionName: 'yesToken', blockNumber }),
+      this.client.readContract({ address: market, abi: marketAbi, functionName: 'noToken', blockNumber }),
+    ]) as [boolean, boolean, Address, Address];
+    if (!registered) throw new MarketError('unknown_market');
+    const orders = await this.commitments(maker, market, blockNumber);
+    const assets = [{ asset: 'USDC' as const, token: this.config.usdc }, { asset: 'YES' as const, token: yesToken },
+      { asset: 'NO' as const, token: noToken }];
+    const funds = await Promise.all(assets.flatMap(item => [
+      this.client.readContract({ address: item.token, abi: erc20Abi, functionName: 'balanceOf', args: [maker], blockNumber }),
+      this.client.readContract({ address: item.token, abi: erc20Abi, functionName: 'allowance', args: [maker, this.config.aqua], blockNumber }),
+    ]));
+    const [usdc, yes, no] = assets.map((item, index) => MarketService.describe(
+      budgetOf({ token: item.token, balance: funds[index * 2] as bigint, allowance: funds[index * 2 + 1] as bigint, orders }),
+      item.asset));
+    return { block: Number(blockNumber), market, maker, spender: this.config.aqua, marketOpen: isOpen,
+      usdc: usdc!, yes: yes!, no: no! };
   }
 
   private validatePublish(input: PublishInput): Curve {
@@ -160,6 +266,17 @@ export class MarketService {
   /**
    * Prepares a curve publication for the maker's own wallet. Selling acquired outcomes always
    * requires this explicit step: receiving outcome tokens never creates a sell authorization.
+   *
+   * Publication is two transactions, in this order:
+   *
+   * 1. `ship` to Aqua, which records the allocation this order may draw on.
+   * 2. `admitCurve` on the Horizon router, which is where the per-market budget is enforced and
+   *    what makes the order executable at all. Aqua's `ship` has no application callback, so the
+   *    router cannot be consulted during step 1 — and an order that stops after step 1 never fills.
+   *
+   * The figures returned here are advisory: they are read at one block and any of them can move
+   * before the maker signs. The refusal that counts happens in step 2, on chain, where two
+   * publications racing each other cannot both pass because the second one reads the first.
    */
   async preparePublication(input: PublishInput) {
     const strategy = this.validatePublish(input);
@@ -174,25 +291,45 @@ export class MarketService {
     if (outcome.toLowerCase() !== expected.toLowerCase()) throw new MarketError('outcome_token_mismatch');
     const order = await this.client.readContract({ address: this.config.router, abi: routerAbi, functionName: 'buildCurveOrder', args: [input.maker, strategy] });
     const encoded = encodeAbiParameters(parseAbiParameters('(address maker,uint256 traits,bytes data)'), [order]);
-    // A BUY posts a USDC budget and no inventory; a SELL posts inventory and no budget.
-    const budget = input.isBuy ? cumulative(strategy, strategy.maxShares) : 0n;
-    const amounts = input.isBuy ? [0n, budget] : [strategy.maxShares, 0n];
+    // A BUY posts a USDC budget and no inventory; a SELL posts inventory and no budget. The BUY
+    // figure is the exact curve integral over the whole size, not the opening price times the size,
+    // and it is the same figure the router records at admission — so the check below predicts that
+    // refusal rather than approximating it.
+    const fundingAmount = obligationOf({ ...strategy, filled: 0n });
+    const amounts = input.isBuy ? [0n, fundingAmount] : [strategy.maxShares, 0n];
     const fundingToken = input.isBuy ? this.config.usdc : outcome;
-    const fundingAmount = input.isBuy ? budget : strategy.maxShares;
+    // Never the cached head: a budget read a few seconds behind a fill is exactly the stale check
+    // this rule exists to avoid relying on.
+    const blockNumber = await this.client.getBlockNumber({ cacheTime: 0 });
+    const orders = await this.commitments(input.maker, input.market, blockNumber);
     const [balance, allowance] = await Promise.all([
-      this.client.readContract({ address: fundingToken, abi: erc20Abi, functionName: 'balanceOf', args: [input.maker] }),
-      this.client.readContract({ address: fundingToken, abi: erc20Abi, functionName: 'allowance', args: [input.maker, this.config.aqua] }),
+      this.client.readContract({ address: fundingToken, abi: erc20Abi, functionName: 'balanceOf', args: [input.maker], blockNumber }),
+      this.client.readContract({ address: fundingToken, abi: erc20Abi, functionName: 'allowance', args: [input.maker, this.config.aqua], blockNumber }),
     ]) as [bigint, bigint];
+    const budget = MarketService.describe(budgetOf({ token: fundingToken, balance, allowance, orders }),
+      input.isBuy ? 'USDC' : input.isYes ? 'YES' : 'NO');
+    const capacity = checkCapacity(budget, fundingAmount);
+    // What this order needs the wallet to hold and Aqua to be allowed to move: itself, plus what
+    // this market has already committed. Approving only this order's own amount would leave the
+    // admission short and fail on chain.
+    const required = budget.committed + fundingAmount;
+    const readiness = balance < required ? (budget.committed > 0n ? 'over_budget' : 'insufficient_balance')
+      : allowance < required ? 'approval_required' : 'ready';
     return {
       strategy: { ...strategy, maxShares: strategy.maxShares.toString() }, orderHash: keccak256(encoded),
       outcomeToken: outcome, tokens: [outcome, this.config.usdc], amounts: amounts.map(String),
       // Aqua allocations are permissions over a shared wallet balance, not reserved funds.
       shared: input.isBuy ? 'USDC allocations are shared with this wallet’s other markets; a fill elsewhere reduces what remains here.'
         : 'Outcome tokens are bound to this market and outcome and are never reused by another market.',
-      readiness: balance < fundingAmount ? 'insufficient_balance' : allowance < fundingAmount ? 'approval_required' : 'ready',
-      approval: { token: fundingToken, spender: this.config.aqua, amount: fundingAmount.toString() },
+      readiness,
+      budget: { ...budget, block: Number(blockNumber), requested: fundingAmount, required,
+        fits: capacity.ok, shortfall: capacity.ok ? 0n : capacity.shortfall },
+      approval: { token: fundingToken, spender: this.config.aqua, amount: required.toString() },
       transaction: { to: this.config.aqua, value: '0',
         data: encodeFunctionData({ abi: aquaAbi, functionName: 'ship', args: [this.config.router, encoded, [outcome, this.config.usdc], amounts] }) },
+      // Step two, and the only refusal that binds: the router checks this market's budget here.
+      admission: { to: this.config.router, value: '0',
+        data: encodeFunctionData({ abi: routerAbi, functionName: 'admitCurve', args: [strategy] }) },
       fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
     };
   }
