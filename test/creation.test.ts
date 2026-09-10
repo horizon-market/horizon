@@ -121,7 +121,7 @@ test('World verification is unavailable until access is granted, and never grant
   assert.match(rp.signature, /^0x[0-9a-f]+$/i);
   assert.ok(rp.expires_at > rp.created_at);
   proofSchema.parse({
-    protocol_version: '3.0', nonce: 'request-nonce', action: 'create-market', environment: 'staging', user_presence_completed: true,
+    protocol_version: '3.0', nonce: 'request-nonce', action: 'create-market', environment: 'sandbox', user_presence_completed: true,
     responses: [{ identifier: 'selfie', signal_hash: `0x${'12'.repeat(32)}`, proof: `0x${'34'.repeat(64)}`,
       merkle_root: `0x${'56'.repeat(32)}`, nullifier: `0x${'78'.repeat(32)}` }],
   });
@@ -166,6 +166,42 @@ test('a World proof is refused unless it is bound to this action, environment an
     (error: unknown) => error instanceof VerificationRejectedError);
   await assert.rejects(() => verifier.verify(proof(), requestId),
     (error: unknown) => error instanceof VerificationUnavailableError);
+});
+
+test('World accepts the legacy SDK result without presence and forwards optional metadata unchanged', async t => {
+  const requestId = '11111111-2222-3333-4444-555555555555';
+  const result = {
+    protocol_version: '3.0', nonce: 'request-nonce', action: 'create-market', environment: 'sandbox',
+    action_description: 'Verify for the creation discount',
+    integrity_bundle: { version: 1, signature_format: 'apple_app_attest', timestamp: 1789030800, signature: '0x1234', jwt: 'test-attestation' },
+    responses: [{ identifier: 'selfie', signal_hash: hashSignal(requestId), proof: `0x${'34'.repeat(64)}`,
+      merkle_root: `0x${'56'.repeat(32)}`, nullifier: `0x${'78'.repeat(32)}`, max_age: 304200 }],
+  };
+  const proof = proofSchema.parse(result);
+  assert.deepEqual(proof, result);
+  assert.equal(Object.hasOwn(proof, 'user_presence_completed'), false);
+  for (const presence of [true, false]) {
+    assert.equal(proofSchema.parse({ ...result, user_presence_completed: presence }).user_presence_completed, presence);
+  }
+  assert.equal(proofSchema.safeParse({ ...result, user_presence_completed: 'true' }).success, false);
+  assert.equal(proofSchema.safeParse({ ...result, responses: [{ ...result.responses[0], signal_hash: undefined }] }).success, false);
+
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (url: URL | RequestInfo, init?: RequestInit) => {
+    assert.equal(String(url), 'https://developer.world.org/api/v4/verify/rp_test');
+    assert.deepEqual(JSON.parse(String(init?.body)), result);
+    return Response.json({ success: true, results: [{ identifier: 'selfie', success: true }] });
+  });
+  const verifier = new WorldSelfieVerifier({ appId: 'app_test', rpId: 'rp_test', action: result.action,
+    environment: 'sandbox', access: 'granted', verifyUrl: 'https://developer.world.org' });
+  assert.deepEqual(await verifier.verify(proof, requestId), {
+    nullifierHash: result.responses[0]!.nullifier, credentialType: 'selfie', verifier: 'world-selfie-check',
+  });
+  assert.equal(fetchMock.mock.callCount(), 1);
+  // A parseable HTTP 200 body alone is never sufficient to grant the discount.
+  for (const body of [{}, { success: false }, { success: 'true' }, null]) {
+    fetchMock.mock.mockImplementation(async () => Response.json(body));
+    await assert.rejects(() => verifier.verify(proof, requestId), VerificationRejectedError);
+  }
 });
 
 test('one outcome\'s book restates the other outcome\'s orders at one minus their price', () => {

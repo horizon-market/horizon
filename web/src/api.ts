@@ -18,7 +18,7 @@ export type AppConfig = {
   trading: { registry: string; router: string; executor: string; aqua: string; usdc: string; decimals: number; maxRouteFills: number } | null;
   creation: { available: boolean; priceUnits: string; discountBps: number; asset: string; assetId: string; assetDecimals: number; network: string; settlementMode: 'live' | 'simulated'; facilitator: string; walletConnectProjectId: string | null; note: string };
   ai: { provider: string; mode: 'live' | 'development' };
-  world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'staging' | 'production' };
+  world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'sandbox' | 'staging' | 'production' };
   resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string };
 };
 export type SideLiquidity = { ask: number | null; bid: number | null; availableShares: string };

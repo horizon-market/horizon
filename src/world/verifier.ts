@@ -8,14 +8,16 @@ export const proofSchema = z.object({
   protocol_version: z.literal('3.0'),
   nonce: z.string().min(1).max(128),
   action: z.string().min(1).max(128),
-  environment: z.enum(['staging', 'production']),
+  environment: z.enum(['sandbox', 'staging', 'production']),
   responses: z.array(z.object({
     identifier: z.string().min(1).max(64), signal_hash: z.string().regex(/^0x[0-9a-fA-F]{1,128}$/),
     proof: z.string().min(16).max(16384), merkle_root: z.string().regex(/^0x[0-9a-fA-F]{1,128}$/),
     nullifier: z.string().regex(/^0x[0-9a-fA-F]{1,64}$/),
-  }).strict()).min(1).max(8),
-  user_presence_completed: z.boolean(),
-}).strict();
+  }).passthrough()).min(1).max(8),
+  // IDKit only includes this flag when a user-presence check was requested.
+  user_presence_completed: z.boolean().optional(),
+  // Preserve optional SDK metadata (e.g. integrity_bundle) for World's verifier.
+}).passthrough();
 export type VerificationProof = z.infer<typeof proofSchema>;
 
 /** Only the minimum needed to bind a discount and prevent replay is returned for storage. */
@@ -66,9 +68,9 @@ export class WorldSelfieVerifier implements HumanVerifier {
       });
     } catch { throw new VerificationUnavailableError('World verification endpoint was unreachable.'); }
     if (response.status === 200) {
-      const body = z.object({ success: z.boolean().optional() }).passthrough()
+      const body = z.object({ success: z.literal(true) }).passthrough()
         .safeParse(await response.json().catch(() => null));
-      if (!body.success || body.data.success === false) throw new VerificationRejectedError('World did not confirm the credential.');
+      if (!body.success) throw new VerificationRejectedError('World did not confirm the credential.');
       const nullifiers = new Set(proof.responses.map(item => item.nullifier.toLowerCase()));
       if (nullifiers.size !== 1) throw new VerificationRejectedError('World returned inconsistent credential nullifiers.');
       return {

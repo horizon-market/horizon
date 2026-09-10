@@ -225,6 +225,7 @@ function Verification({ request, saved, busy, act, onVerified, onSkip }: {
   const [proof, setProof] = useState('');
   const [rpContext, setRpContext] = useState<RpContext | undefined>();
   const [worldOpen, setWorldOpen] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
   return (
     <Card title="Human verification (optional)">
       <p className="small muted">
@@ -232,20 +233,28 @@ function Verification({ request, saved, busy, act, onVerified, onSkip }: {
         Only the credential's nullifier hash and type are stored. Verification is an abuse-resistance signal, not proof of forecasting skill.
       </p>
       {request.verification && <Notice kind="ok">Verified {request.verification.credentialType} credential recorded at {dateTime(request.verification.verifiedAt)}.</Notice>}
+      {verificationError && <Notice kind="error">{verificationError}</Notice>}
       {!config.world.available
         ? <Notice kind="warn">
             World Selfie Check is unavailable on this deployment (access: {config.world.access}). {config.world.reason} The standard price applies.
           </Notice>
         : config.world.widgetAvailable ? <div className="stack">
             <button className="primary" disabled={busy} onClick={() => void act(() => api.worldContext(saved.id, saved.token)).then(context => {
-              if (context) { setRpContext(context); setWorldOpen(true); }
+              if (context) { setVerificationError(null); setRpContext(context); setWorldOpen(true); }
             })}>Verify with World</button>
             {rpContext && <Suspense fallback={<p className="small muted">Loading World verification…</p>}>
               <WorldVerification open={worldOpen} onOpenChange={setWorldOpen} appId={config.world.appId}
                 action={config.world.action} environment={config.world.environment} requestId={request.id} rpContext={rpContext}
                 onVerify={async result => {
-                  const updated = await api.verify(saved.id, saved.token, result);
-                  onVerified(updated.request);
+                  try {
+                    const updated = await api.verify(saved.id, saved.token, result);
+                    setVerificationError(null);
+                    onVerified(updated.request);
+                  } catch (error) {
+                    setVerificationError(error instanceof ApiError ? describe(error.code) : 'Could not reach Horizon to verify the proof. Please try again.');
+                    // IDKit must still show failure when our backend does not verify the proof.
+                    throw error;
+                  }
                 }} />
             </Suspense>}
           </div>

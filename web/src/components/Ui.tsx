@@ -69,6 +69,8 @@ const MESSAGES: Record<string, string> = {
   draft_hash_mismatch: 'The draft changed after it was displayed. Reload and review it again.',
   verification_unavailable: 'World verification is unavailable, so the discount cannot be applied.',
   verification_rejected: 'World did not accept the credential.',
+  invalid_proof: 'Horizon could not read the World proof. Close the verification window and try again.',
+  verification_failed: 'Horizon could not finish verifying the World proof. Please try again.',
   verification_after_payment_requirements: 'Payment requirements were already issued; the price cannot change now.',
   payment_awaiting_reconciliation: 'The last payment result was ambiguous. An operator must reconcile it before anything else happens; you will not be charged twice.',
   payment_in_progress_reconcile: 'A payment for this request is already in progress.',

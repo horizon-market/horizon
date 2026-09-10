@@ -30,7 +30,7 @@ export type PaymentsConfig = {
   mode: 'live' | 'simulated'; priceUnits: bigint; discountBps: number; timeoutSeconds: number; walletConnectProjectId?: string;
 };
 /** World access is an administrative declaration; only `granted` may attempt a live verification. */
-export type WorldConfig = { appId: string; rpId: string; signingKey?: string; action: string; environment: 'staging' | 'production'; access: 'unknown' | 'requested' | 'granted'; verifyUrl: string };
+export type WorldConfig = { appId: string; rpId: string; signingKey?: string; action: string; environment: 'sandbox' | 'staging' | 'production'; access: 'unknown' | 'requested' | 'granted'; verifyUrl: string };
 export type AiConfig = { provider: 'anthropic' | 'development'; apiKey?: string; model: string };
 /** Server-side market deployment. The key stays in the API/worker process and never reaches a browser. */
 export type CreationConfig = { rpc: string; registry: Address; resolver: Address; privateKey?: Hex; minCloseInSeconds: number; maxCloseInSeconds: number };
@@ -62,7 +62,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!Number.isInteger(assetDecimals) || assetDecimals < 0 || assetDecimals > 18) throw new Error('Invalid configuration: HEDERA_ASSET_DECIMALS');
   const mode = env.HEDERA_PAYMENT_MODE === 'simulated' ? 'simulated' : 'live';
   const access = ['unknown', 'requested', 'granted'].includes(env.WORLD_SELFIE_ACCESS ?? '') ? env.WORLD_SELFIE_ACCESS as WorldConfig['access'] : 'unknown';
-  const worldEnvironment = env.WORLD_ENVIRONMENT === 'production' ? 'production' : 'staging';
+  const worldEnvironment = ['sandbox', 'staging', 'production'].includes(env.WORLD_ENVIRONMENT ?? '')
+    ? env.WORLD_ENVIRONMENT as WorldConfig['environment'] : 'sandbox';
   const config: Config = {
     ...result.data,
     marketSync: {

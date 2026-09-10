@@ -113,7 +113,13 @@ if (phase3Evidence?.creation.market && env.HORIZON_REGISTRY_ADDRESS && env.EVM_R
   return 'The paid agent request produced a registered market whose creation id derives from its request id, resolved by the disclosed Horizon resolver.';
 });
 
-report('World', 'pending', `Selfie Check access declared ${['unknown', 'requested', 'granted'].includes(env.WORLD_SELFIE_ACCESS ?? '') ? env.WORLD_SELFIE_ACCESS : 'unknown'}. App configuration and an actual credential verification are still required.`);
+const worldFields = ['WORLD_APP_ID', 'WORLD_RP_ID', 'WORLD_RP_SIGNING_KEY', 'WORLD_ACTION'] as const;
+const missingWorld = worldFields.filter(key => !env[key]);
+if (env.WORLD_SELFIE_ACCESS === 'granted' && missingWorld.length === 0 && ['sandbox', 'staging', 'production'].includes(env.WORLD_ENVIRONMENT ?? '')) {
+  report('World', 'pending', `Selfie Check ${env.WORLD_ENVIRONMENT} configuration and server-side RP signing are ready. Complete one real credential verification to prove the discount path.`);
+} else {
+  report('World', 'pending', `Selfie Check access is ${env.WORLD_SELFIE_ACCESS || 'unknown'}; ${missingWorld.length ? `missing ${missingWorld.join(', ')}.` : 'select sandbox, staging or production explicitly.'}`);
+}
 report('AI drafting provider', env.AI_PROVIDER === 'anthropic' && Boolean(env.ANTHROPIC_API_KEY) ? 'ok' : 'pending',
   env.AI_PROVIDER === 'anthropic' && env.ANTHROPIC_API_KEY ? 'Anthropic drafting is configured; live Graph duplicate context is supplied by the creation service.' : 'The Graph-grounded deterministic fallback works, but a live AI provider is not configured.');
 if (env.NODE_ENV === 'production' && /^https:\/\//.test(env.WEB_ORIGIN ?? '')) await check('Public HTTPS app and API', async () => {

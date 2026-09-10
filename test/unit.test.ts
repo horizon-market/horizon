@@ -21,3 +21,14 @@ test('configuration validation identifies fields without leaking secrets', () =>
     return true;
   });
 });
+
+test('World sandbox is preserved as an IDKit environment', () => {
+  const config = loadConfig({
+    DATABASE_URL: 'postgresql://horizon:test@127.0.0.1:5432/horizon',
+    ADMIN_EMAIL: 'admin@horizon.local',
+    ADMIN_PASSWORD_HASH: `scrypt$${'11'.repeat(16)}$${'22'.repeat(64)}`,
+    SESSION_SECRET: 'test-session-secret-that-is-long-enough',
+    WORLD_ENVIRONMENT: 'sandbox',
+  });
+  assert.equal(config.world.environment, 'sandbox');
+});
