@@ -48,6 +48,70 @@ optimum.
 Only USDC is shared across markets. A YES or NO token is bound to one market and outcome, and
 holding it creates no sell offer: a holder must explicitly publish a sell curve.
 
+### Per-market order budgets
+
+Shared USDC is available capital, not multiplied capital. Sharing it across markets is deliberate;
+promising it twice **inside one market** is not, and is what this rule prevents.
+
+**The accounting.** Commitments are grouped by `(maker, market, funding token)`, on normalised
+addresses. The funding token is the single token an order can spend: USDC for a BUY whichever
+outcome it names, and that market's YES or NO token for a SELL. So BUY YES and BUY NO share one
+USDC budget, while a YES sell and a NO sell each draw on their own inventory. Outcome tokens are
+never shared between markets in the first place; the grouping only stops two sell orders from
+offering the same inventory twice.
+
+- **Spendable** is `min(balance, allowance to Aqua)`. An allowance is not money, and money the
+  spender may not move cannot be spent. Approving tokens reserves nothing.
+- **An order's obligation** is the exact integer curve integral over the size it has left —
+  `cumulative(maxShares) − cumulative(filled)` for a BUY, undelivered shares for a SELL. Never the
+  share count, never the opening price times the size, never the original budget after a partial
+  fill. A fixed-price limit order is a curve with equal endpoints and goes through the same
+  arithmetic, so limit orders and curves are counted together.
+- **The rule**: `committed in this group + this order's obligation ≤ spendable`. Equality is
+  accepted; one base unit more is refused.
+- **Reconciliation.** Each commitment is capped by the order's own Aqua allocation, because Aqua
+  will not release more than it holds. Only two conditions release a commitment: the maker docked
+  the order, or it filled to its size. A fill is not a cancellation — it reduces the obligation and
+  the wallet by the same amount, so the room for a further order is unchanged. An order whose
+  allocation has run out contributes nothing but is not released, because a later Aqua push can
+  refund it. **An underfunded wallet never releases a commitment**: counting an outstanding order
+  for less would invent room for another one.
+- **Over budget.** If shared funds are spent in another market, withdrawn, or the approval is
+  reduced, `committed` can exceed `spendable`. Available capacity is then zero, the condition is
+  reported as `overcommitted`, and no further order is admitted here until the maker cancels one or
+  restores the funds. Existing orders are untouched: nothing is auto-cancelled, auto-resold or
+  resized, and there is no global reservation.
+
+**Where it is enforced.** In `OrderBudget`, the ledger `HorizonSwapVM` deploys and owns, at the
+moment an order is admitted. Publication is therefore two transactions:
+
+1. `Aqua.ship` — records the allocation the order may draw on.
+2. `HorizonSwapVM.admitCurve` — checks this market's budget and makes the order executable.
+
+They cannot be one transaction: Aqua's `ship` has no application callback, so the router cannot be
+consulted while it runs. Anyone can ship a strategy naming this router without asking Horizon, which
+is exactly why the check cannot live in the API. **An order the router has not admitted never
+fills** — `_runCurve` and the Phase 1 BUY opcode both refuse it — so a direct Aqua publication is
+inert: it holds the maker's allocation, consumes no budget, and is filtered out of discovery
+(`admitted` in the subgraph) and of quoting (the quote service drops unadmitted candidates by RPC).
+Its maker can still dock it to take the allocation back, and the Portfolio lists it as **Not
+published** with that instruction.
+
+**Concurrency.** Two publications racing each other cannot both pass, because admission is a
+transaction: the second reads the first. The API check is advisory — it is read at one block and
+any figure can move before the maker signs — and nothing is reserved for a prepared or claimed-but
+-unconfirmed transaction. The API refuses to prepare a publication at all when the ledger cannot be
+read (`order_budget_unavailable`, HTTP 503) rather than treating an unknown budget as an empty one.
+The budget is never derived from indexed data: the ledger's `openOrders` list is the complete set of
+a maker's commitments in a market by construction, so a stale or unavailable Graph can neither hide
+a commitment nor invent one.
+
+**What this does not do.** It does not reserve funds, guarantee that any order fills, or coordinate
+across markets: two markets can each commit the same wallet in full, and a transaction in one can
+leave the other over budget. It does not deactivate orders automatically. And it is per wallet — it
+says nothing about competing transactions racing for the same balance at fill time, which the
+executor's own limits and rollback handle.
+
 ## Market creation
 
 ```

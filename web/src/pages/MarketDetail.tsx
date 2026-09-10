@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, type MakerCurve, type Market, type MarketEventContext, type Position, type Publication } from '../api';
+import { api, type MakerCurve, type Market, type MarketBudgets, type MarketEventContext, type Position } from '../api';
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
-import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState, describe, type TxState } from '../components/Ui';
-import { isLive, useCancelCurve } from '../orders';
+import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState } from '../components/Ui';
+import { isLive, useCancelCurve, usePublishCurve } from '../orders';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
 import { OrderBook } from '../components/OrderBook';
 import { CurveLiquidity } from '../components/CurveLiquidity';
 import { CurveOrder } from '../components/CurveOrder';
+import { BudgetSection, PublishActions } from '../components/FundingBudget';
 import { MarketOrder, sideLabel, type Side } from '../components/MarketOrder';
 import { separate } from '../curve';
-import { approve, confirm, describeWalletError, send } from '../wallet';
 
 const RESULTS = ['Unresolved', 'YES', 'NO', 'INVALID'];
 
@@ -28,10 +28,16 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
   // What this account already has in this market: the orders it is resting here, and the outcome
   // tokens it holds. Both come from endpoints that cover every market, filtered to this one.
   const mine = useAsync(async () => {
-    if (!account) return { orders: [] as MakerCurve[], position: undefined as Position | undefined };
-    const [published, held] = await Promise.all([api.makerCurves(account), api.positions(account)]);
+    if (!account) return { orders: [] as MakerCurve[], position: undefined as Position | undefined, budgets: null };
     const here = (id: string) => id.toLowerCase() === market.toLowerCase();
-    return { orders: published.curves.filter(curve => here(curve.market)), position: held.positions.find(p => here(p.market)) };
+    const [published, held, budgets] = await Promise.all([
+      api.makerCurves(account), api.positions(account),
+      // A budget that cannot be read becomes null, never an empty one: the maker ticket refuses to
+      // review an order whose market commitments it cannot account for.
+      api.marketBudgets(market, account).catch(() => null),
+    ]);
+    return { orders: published.curves.filter(curve => here(curve.market)),
+      position: held.positions.find(p => here(p.market)), budgets };
   }, [account, market]);
   const [isYes, setIsYes] = useState(opening.isYes);
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
@@ -96,7 +102,8 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
         <div className="stack">
           {data.status === 'OPEN'
             ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes}
-                account={account} position={mine.data?.position} onDone={refresh} opening={opening} />
+                account={account} position={mine.data?.position} budgets={mine.data?.budgets}
+                onDone={refresh} opening={opening} />
             : <Card title="Trading closed">
                 <p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Portfolio</a>.</p>
                 {/* The ticket is what normally chooses the outcome, so a closed market lends its selector. */}
@@ -165,7 +172,6 @@ function OutcomeChoice({ isYes, onOutcome }: { isYes: boolean; onOutcome: (value
 
 type OrderType = 'market' | 'limit' | 'curve';
 
-const label = sideLabel;
 const TABS: { key: OrderType; label: string }[] = [
   { key: 'market', label: 'Market' }, { key: 'limit', label: 'Limit' }, { key: 'curve', label: 'Curve' },
 ];
@@ -177,9 +183,11 @@ const TABS: { key: OrderType; label: string }[] = [
  * Aqua order — a limit order is simply the one whose start and end prices are equal — which is why
  * they belong on one control rather than on separate pages.
  */
-function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone, opening }: {
+function OrderTicket({ market, book, isYes, onOutcome, account, position, budgets, onDone, opening }: {
   market: string; book: Market['liquidity']; isYes: boolean; onOutcome: (isYes: boolean) => void;
-  account?: string; position?: Position; onDone: () => void;
+  account?: string; position?: Position;
+  /** Undefined while loading, null when the market's budget could not be read at all. */
+  budgets?: MarketBudgets | null; onDone: () => void;
   opening: { type: OrderType; isBuy: boolean };
 }) {
   const wallet = useWallet();
@@ -216,8 +224,8 @@ function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone
         </p>
       )}
       {type === 'market' && <MarketOrder market={market} side={side} account={account} onDone={onDone} onSwitchToLimit={() => setType('limit')} />}
-      {type === 'limit' && <LimitOrder market={market} side={side} account={account} book={outcome} onDone={onDone} />}
-      {type === 'curve' && <CurveOrder market={market} side={side} account={account} book={outcome} onDone={onDone} />}
+      {type === 'limit' && <LimitOrder market={market} side={side} account={account} book={outcome} budgets={budgets} onDone={onDone} />}
+      {type === 'curve' && <CurveOrder market={market} side={side} account={account} book={outcome} budgets={budgets} onDone={onDone} />}
       {!account && (
         <button className="primary" style={{ width: '100%', marginTop: '.6rem' }} onClick={() => void wallet.connect()}>Connect wallet</button>
       )}
@@ -276,17 +284,16 @@ function YourOrders({ orders, account, onDone }: { orders: MakerCurve[]; account
 }
 
 /** Rests at the maker's own price. This is a curve with equal endpoints, published through Aqua. */
-function LimitOrder({ market, side, account, book, onDone }: {
-  market: string; side: Side; account?: string; book: { ask: number | null; bid: number | null }; onDone: () => void;
+function LimitOrder({ market, side, account, book, budgets, onDone }: {
+  market: string; side: Side; account?: string; book: { ask: number | null; bid: number | null };
+  budgets?: MarketBudgets | null; onDone: () => void;
 }) {
   const suggested = ((side.isBuy ? book.bid ?? book.ask : book.ask ?? book.bid) ?? 500_000) / 1_000_000;
   const [price, setPrice] = useState(suggested.toFixed(4).replace(/0+$/, '').replace(/\.$/, ''));
   const [size, setSize] = useState('10');
-  const [prepared, setPrepared] = useState<Publication | undefined>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const [tx, setTx] = useState<TxState>({ phase: 'idle' });
-  useEffect(() => { setPrepared(undefined); setTx({ phase: 'idle' }); setError(undefined); }, [price, size, side.isBuy, side.isYes]);
+  const publication = usePublishCurve(account, onDone);
+  const { prepared, error } = publication;
+  useEffect(() => { publication.reset(); }, [price, size, side.isBuy, side.isYes]);
 
   const micro = Math.round(Number(price) * 1_000_000);
   const priceError = Number.isInteger(micro) && micro > 0 && micro < 1_000_000 ? undefined : 'Enter a price between 0 and 1 USDC.';
@@ -298,33 +305,14 @@ function LimitOrder({ market, side, account, book, onDone }: {
   }, [size]);
   const total = amount.value && !priceError ? (amount.value * BigInt(micro)) / 1_000_000n : undefined;
 
-  const review = async () => {
+  const review = () => {
     if (!account || priceError || amount.error || !amount.value) return;
-    setError(undefined); setBusy(true);
-    try {
-      // Equal start and end prices on the linear preset is exactly a fixed-price order.
-      setPrepared(await api.publishCurve({ maker: account, market, isYes: side.isYes, isBuy: side.isBuy,
-        startPrice: micro, endPrice: micro, shares: amount.value.toString(), shape: 1 }));
-    } catch (issue) { setError(issue instanceof ApiError ? describe(issue.code) : 'Could not prepare the order.'); }
-    finally { setBusy(false); }
+    // Equal start and end prices on the linear preset is exactly a fixed-price order, and it goes
+    // through the same per-market budget as any curve.
+    void publication.review({ maker: account, market, isYes: side.isYes, isBuy: side.isBuy,
+      startPrice: micro, endPrice: micro, shares: amount.value.toString(), shape: 1 });
   };
 
-  const run = async (action: 'approve' | 'place') => {
-    if (!account || !prepared) return;
-    setTx({ phase: 'signing' });
-    try {
-      const hash = action === 'approve'
-        ? await approve(account, prepared.approval.token, prepared.approval.spender, prepared.approval.amount)
-        : await send(account, prepared.transaction);
-      setTx({ phase: 'pending', hash });
-      const status = await confirm(account, hash);
-      if (status !== 'success') { setTx({ phase: 'error', hash, message: 'The transaction reverted.' }); return; }
-      setTx({ phase: 'confirmed', hash });
-      if (action === 'approve') await review(); else { setPrepared(undefined); onDone(); }
-    } catch (issue) { setTx({ phase: 'error', message: describeWalletError(issue) }); }
-  };
-
-  const working = tx.phase === 'signing' || tx.phase === 'pending';
   return (
     <div className="stack">
       <div className="field" style={{ marginBottom: 0 }}>
@@ -349,20 +337,12 @@ function LimitOrder({ market, side, account, book, onDone }: {
         {side.isBuy && ' A resting bid also funds complementary minting for a trader buying the opposite outcome.'}
       </Notice>
       {!account && <Notice kind="info">Connect a wallet to place an order from your own account.</Notice>}
+      {account && <BudgetSection budgets={budgets} side={side}
+        budget={prepared?.budget} requested={prepared ? BigInt(prepared.budget.requested) : side.isBuy ? total : amount.value} />}
       {error && <Notice kind="error">{error}</Notice>}
-      {prepared?.readiness === 'insufficient_balance' && (
-        <Notice kind="warn">Not enough {side.isBuy ? 'test USDC' : `${side.isYes ? 'YES' : 'NO'} tokens`} to back this order.</Notice>
-      )}
-      <TransactionState state={tx} />
-      {!prepared
-        ? <button className={`wide ${side.isBuy ? 'yes' : 'no'}`} disabled={busy || !account || Boolean(priceError) || Boolean(amount.error)}
-            onClick={() => void review()}>{busy ? 'Checking…' : `Review ${label(side)}`}</button>
-        : prepared.readiness === 'approval_required'
-          ? <button className="primary wide" disabled={working} onClick={() => void run('approve')}>
-              Approve {side.isBuy ? 'USDC' : 'outcome tokens'} for Aqua
-            </button>
-          : <button className={`wide ${side.isBuy ? 'yes' : 'no'}`} disabled={working || prepared.readiness !== 'ready'}
-              onClick={() => void run('place')}>Place limit order</button>}
+      <PublishActions publication={publication} side={side} onReview={review}
+        labels={{ review: `Review ${sideLabel(side)}`, publish: 'Place limit order' }}
+        canReview={Boolean(budgets) && Boolean(account) && !priceError && !amount.error} />
     </div>
   );
 }

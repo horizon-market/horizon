@@ -8,8 +8,10 @@ const strategySchema = z.object({ id: z.string().regex(/^0x[0-9a-fA-F]{64}$/), m
   flags: z.number().int().min(4).max(15), startPrice: integer, endPrice: integer, maxShares: integer,
   salt: z.string().regex(/^0x[0-9a-fA-F]{64}$/) });
 export type Discovered = { id: Hex; maker: Address; strategy: Curve };
+// `admitted` is what makes an order executable: shipping to Aqua without the router's admission
+// publishes nothing Horizon will fill, so such an order is not depth and never reaches discovery.
 const MARKET_FIELDS = `id creationId question rules evidenceSource closeAt resolver yesToken noToken result resolutionEvidence collateral createdAt
-        strategies(first: 50, where: { active: true }, orderBy: id) { id maker flags startPrice endPrice maxShares salt filled }`;
+        strategies(first: 50, where: { active: true, admitted: true }, orderBy: id) { id maker flags startPrice endPrice maxShares salt filled }`;
 const marketSchema = z.object({
   id: address, creationId: z.string(), question: z.string().max(400), rules: z.string().max(4000),
   evidenceSource: z.string().max(1000), closeAt: integer, resolver: address, yesToken: address, noToken: address,
@@ -30,14 +32,15 @@ export type IndexedSnapshot = { block: number; hash: Hex; markets: IndexedMarket
 const marketRef = z.object({ id: address, question: z.string().max(400) });
 const activitySchema = z.object({
   _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }),
-  strategies: z.array(strategySchema.extend({ market: marketRef, filled: integer, active: z.boolean(), publishedAt: integer })).max(200),
+  strategies: z.array(strategySchema.extend({ market: marketRef, filled: integer, active: z.boolean(), admitted: z.boolean(), publishedAt: integer })).max(200),
   fills: z.array(z.object({ id: z.string(), shares: integer, usdc: integer, block: integer, transaction: z.string(),
     strategy: z.object({ id: z.string(), maker: address, flags: z.number().int().min(0).max(15), market: marketRef }) })).max(200),
   routes: z.array(z.object({ id: z.string(), taker: address, recipient: address, isYes: z.boolean(), isBuy: z.boolean(),
     shares: integer, usdc: integer, fills: integer, transaction: z.string(), block: integer, market: marketRef })).max(200),
 });
 export type OperatorCurve = { id: Hex; maker: Address; market: Address; question: string; flags: number;
-  startPrice: number; endPrice: number; maxShares: bigint; filled: bigint; active: boolean; publishedAt: number; salt: Hex };
+  startPrice: number; endPrice: number; maxShares: bigint; filled: bigint; active: boolean; admitted: boolean;
+  publishedAt: number; salt: Hex };
 export type OperatorFill = { id: Hex; strategy: Hex; maker: Address; flags: number; market: Address; question: string;
   shares: bigint; usdc: bigint; block: number; transaction: Hex };
 export type OperatorRoute = { id: Hex; market: Address; question: string; taker: Address; recipient: Address;
@@ -47,7 +50,7 @@ const makerMarketRef = z.object({ id: address, question: z.string().max(400), cl
   result: z.number().int().min(0).max(3), yesToken: address, noToken: address });
 const makerCurvesSchema = z.object({
   _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }),
-  strategies: z.array(strategySchema.extend({ market: makerMarketRef, filled: integer, active: z.boolean(), publishedAt: integer })).max(100),
+  strategies: z.array(strategySchema.extend({ market: makerMarketRef, filled: integer, active: z.boolean(), admitted: z.boolean(), publishedAt: integer })).max(100),
 });
 export type MakerCurve = OperatorCurve & { closeAt: number; result: number; yesToken: Address; noToken: Address };
 function toSnapshot(data: z.infer<typeof snapshotSchema>): IndexedSnapshot {
@@ -65,11 +68,11 @@ function toSnapshot(data: z.infer<typeof snapshotSchema>): IndexedSnapshot {
 /** One market row as the projection stores it: no nested curves, so a sweep can page both flat. */
 export type ProjectedMarket = Omit<IndexedMarket, 'curves'>;
 export type ProjectedCurve = { id: Hex; market: Address; maker: Address; flags: number; startPrice: number;
-  endPrice: number; maxShares: bigint; filled: bigint; salt: Hex; active: boolean; publishedAt: number };
+  endPrice: number; maxShares: bigint; filled: bigint; salt: Hex; active: boolean; admitted: boolean; publishedAt: number };
 const meta = z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() });
 const pagedMarketsSchema = z.object({ _meta: meta, markets: z.array(marketSchema.omit({ strategies: true })).max(1000) });
 const pagedStrategiesSchema = z.object({ _meta: meta,
-  strategies: z.array(strategySchema.extend({ filled: integer, active: z.boolean(), publishedAt: integer })).max(1000) });
+  strategies: z.array(strategySchema.extend({ filled: integer, active: z.boolean(), admitted: z.boolean(), publishedAt: integer })).max(1000) });
 
 export class GraphError extends Error {}
 
@@ -89,7 +92,7 @@ export class GraphProvider {
     const data = z.object({ _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }), strategies: z.array(strategySchema).max(32) })
       .parse(await this.query(`query Candidates($market: Bytes!) {
         _meta { block { number hash } hasIndexingErrors }
-        strategies(first: 32, orderBy: id, where: { market: $market, active: true }) {
+        strategies(first: 32, orderBy: id, where: { market: $market, active: true, admitted: true }) {
           id maker market { id } flags startPrice endPrice maxShares salt
         }
       }`, { market: market.toLowerCase() }));
@@ -111,7 +114,7 @@ export class GraphProvider {
     const data = activitySchema.parse(await this.query(`query Activity${declaration} {
       _meta { block { number hash } hasIndexingErrors }
       strategies(first: $first, orderBy: publishedAt, orderDirection: desc${byMarket}) {
-        id maker flags startPrice endPrice maxShares salt filled active publishedAt market { id question }
+        id maker flags startPrice endPrice maxShares salt filled active admitted publishedAt market { id question }
       }
       fills(first: $first, orderBy: block, orderDirection: desc${byStrategyMarket}) {
         id shares usdc block transaction strategy { id maker flags market { id question } }
@@ -127,7 +130,7 @@ export class GraphProvider {
         id: strategy.id as Hex, maker: strategy.maker as Address, market: strategy.market.id as Address,
         question: strategy.market.question, flags: strategy.flags, startPrice: Number(strategy.startPrice),
         endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), filled: BigInt(strategy.filled),
-        active: strategy.active, publishedAt: Number(strategy.publishedAt), salt: strategy.salt as Hex,
+        active: strategy.active, admitted: strategy.admitted, publishedAt: Number(strategy.publishedAt), salt: strategy.salt as Hex,
       })),
       fills: data.fills.map(fill => ({
         id: fill.id as Hex, strategy: fill.strategy.id as Hex, maker: fill.strategy.maker as Address,
@@ -147,7 +150,7 @@ export class GraphProvider {
     const data = makerCurvesSchema.parse(await this.query(`query MakerCurves($maker: Bytes!, $first: Int!) {
       _meta { block { number hash } hasIndexingErrors }
       strategies(first: $first, where: { maker: $maker }, orderBy: publishedAt, orderDirection: desc) {
-        id maker flags startPrice endPrice maxShares salt filled active publishedAt
+        id maker flags startPrice endPrice maxShares salt filled active admitted publishedAt
         market { id question closeAt result yesToken noToken }
       }
     }`, { maker: maker.toLowerCase(), first }));
@@ -156,7 +159,7 @@ export class GraphProvider {
       id: strategy.id as Hex, maker: strategy.maker as Address, market: strategy.market.id as Address,
       question: strategy.market.question, flags: strategy.flags, startPrice: Number(strategy.startPrice),
       endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), filled: BigInt(strategy.filled),
-      active: strategy.active, publishedAt: Number(strategy.publishedAt), salt: strategy.salt as Hex,
+      active: strategy.active, admitted: strategy.admitted, publishedAt: Number(strategy.publishedAt), salt: strategy.salt as Hex,
       closeAt: Number(strategy.market.closeAt), result: strategy.market.result,
       yesToken: strategy.market.yesToken as Address, noToken: strategy.market.noToken as Address,
     })) };
@@ -186,14 +189,15 @@ export class GraphProvider {
     const data = pagedStrategiesSchema.parse(await this.query(`query StrategyPage($after: Bytes!, $first: Int!) {
       _meta { block { number hash } hasIndexingErrors }
       strategies(first: $first, orderBy: id, orderDirection: asc, where: { id_gt: $after }) {
-        id maker flags startPrice endPrice maxShares salt filled active publishedAt market { id }
+        id maker flags startPrice endPrice maxShares salt filled active admitted publishedAt market { id }
       }
     }`, { after: afterId, first }));
     if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
     return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, curves: data.strategies.map(strategy => ({
       id: strategy.id as Hex, market: strategy.market.id as Address, maker: strategy.maker as Address, flags: strategy.flags,
       startPrice: Number(strategy.startPrice), endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares),
-      filled: BigInt(strategy.filled), salt: strategy.salt as Hex, active: strategy.active, publishedAt: Number(strategy.publishedAt),
+      filled: BigInt(strategy.filled), salt: strategy.salt as Hex, active: strategy.active, admitted: strategy.admitted,
+      publishedAt: Number(strategy.publishedAt),
     })) };
   }
 

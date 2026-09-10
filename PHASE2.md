@@ -5,11 +5,13 @@ Verified September 9, 2026 (local time). The Phase 2 exit is complete: a live Gr
 ## Public deployment
 
 - Registry: `0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1`
-- HorizonSwapVM: `0xf155c2ad43d020b601ee51a7e086112a5d00240f`
-- RouteExecutor: `0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4`
+- HorizonSwapVM: `0x2b7592171cc7cfaa21dd60b49c81d68cf584302d` (redeployed September 10, 2026 for per-market order budgets)
+- OrderBudget: `0x563D51c62260F484C5765712fd9716704cF266A2` (deployed and owned by the router)
+- RouteExecutor: `0x657b5cf110bed745c5b3f33c77d61855abb4cfa9`
+- Superseded by that redeployment, kept for reference: HorizonSwapVM `0xf155c2ad43d020b601ee51a7e086112a5d00240f`, RouteExecutor `0xede6eea88b6701e1c40dab0a9bba1cb8890e5bd4`. The registry is unchanged, so markets created before it still exist; orders published to the old router stay there and are not migrated.
 - Official AquaRouter: `0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a`
 - Circle Sepolia USDC: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`
-- [Live Subgraph query endpoint](https://api.studio.thegraph.com/query/1758973/horizon/0.2.0), Studio version `0.2.0`. This is a working Studio deployment, not a claim of decentralized-network publication.
+- [Live Subgraph query endpoint](https://api.studio.thegraph.com/query/1758973/horizon/0.3.1), Studio version `0.3.1`. This is a working Studio deployment, not a claim of decentralized-network publication.
 - [Atomic two-curve transaction](https://sepolia.etherscan.io/tx/0xe59d75c5dc159603433faa068a7cd6bd62e1f09fb8b273705040c349f1557aba).
 
 The configured Aqua deployment is `AquaRouter`, which wraps `Aqua` with upstream simulation, multicall, and rescue functions. Sourcify reports an exact runtime match. Its Aqua core, IAqua interface, and Balance library match the vendored source byte for byte. Its different compiler settings and wrapper explain why comparison against our locally compiled bare Aqua did not match. [Aqua verification](deployments/aqua-verification.json) records the source provenance and observed runtime hash.
@@ -40,7 +42,9 @@ BUY prices decline; SELL prices rise. Equal endpoints are fixed-price limit orde
 
 `CurveMath` evaluates the rational cumulative integral exactly with integer numerator/denominator arithmetic. BUY cumulative cost rounds down; SELL cumulative cost rounds up. Fill cost is the difference between cumulative endpoints. A `1e15` base-unit size cap keeps intermediates below `4e66`, within `uint256`. Splitting cannot change total cumulative cost. Each executed leg must have positive USDC and complementary contributions; tiny unrepresentable fills revert. The quote search aggregates its chunks into valid on-chain legs and expands its search chunk when extreme prices require a larger representable quantity.
 
-Publish through `buildCurveOrder(maker, strategy)` and `Aqua.ship(router, abi.encode(order), [outcome, USDC], amounts)`. A BUY starts with zero outcome allocation and a USDC budget. A SELL starts with an outcome allocation and zero USDC allocation. Approve the asset being sold to Aqua. `maxShares` and Aqua's actual output allocation jointly bound execution. `Aqua.dock` cancels all tokens for an order; changing terms requires a fresh order/salt.
+Publish through `buildCurveOrder(maker, strategy)` and `Aqua.ship(router, abi.encode(order), [outcome, USDC], amounts)`, then `HorizonSwapVM.admitCurve(strategy)`. A BUY starts with zero outcome allocation and a USDC budget. A SELL starts with an outcome allocation and zero USDC allocation. Approve the asset being sold to Aqua. `maxShares` and Aqua's actual output allocation jointly bound execution. `Aqua.dock` cancels all tokens for an order; changing terms requires a fresh order/salt.
+
+Shipping alone does not publish an order to Horizon. `Aqua.ship` has no application callback, so anyone can record a strategy naming this router; the router therefore requires the second step and refuses to fill any order it has not admitted. Admission records the order's remaining obligation in `OrderBudget` — the exact curve integral for a BUY, undelivered shares for a SELL — and refuses it if this market's existing commitments for the same funding token plus this one would exceed `min(balance, allowance to Aqua)`. USDC stays shared across markets; only orders **within one market** are added together, and buying either outcome draws on the same USDC budget while each outcome token is its own inventory. Each fill subtracts exactly what it spent, cancellation and exhaustion release the rest, and no funds are reserved. A shipped-but-unadmitted order is inert: it commits nothing, is excluded from discovery and quoting, and can be docked to recover the allocation. Read `router.budget()` for the ledger address; the router deploys it, so nothing configures it. The full rule is in `docs/ARCHITECTURE.md`.
 
 The instruction reconstructs the entire canonical order and validates its hash, tokens, market, direction, open status, price bounds, and fill capacity. Only USDC can cross market strategies; outcomes always belong to the exact registered market. `decodeCurveOrder` lets the indexer validate publication bytes through the deployed contract. Receiving outcomes never creates a SELL authorization.
 

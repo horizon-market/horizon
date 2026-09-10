@@ -4,11 +4,11 @@ pragma solidity 0.8.30;
 import {AquaSwapVMRouter} from "@1inch/swap-vm/src/routers/AquaSwapVMRouter.sol";
 import {ISwapVM} from "@1inch/swap-vm/src/interfaces/ISwapVM.sol";
 import {MakerTraitsLib} from "@1inch/swap-vm/src/libs/MakerTraits.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Context, ContextLib} from "@1inch/swap-vm/src/libs/VM.sol";
 import {MarketRegistry} from "./MarketRegistry.sol";
 import {BinaryMarket} from "./BinaryMarket.sol";
 import {CurveMath} from "./CurveMath.sol";
+import {OrderBudget} from "./OrderBudget.sol";
 
 /**
  * @notice Horizon's SwapVM application: executable pricing curves, and the per-market order budget
@@ -27,10 +27,6 @@ contract HorizonSwapVM is AquaSwapVMRouter {
     uint8 public constant BUY_OPCODE = 0xf0;
     uint8 public constant CURVE_OPCODE = 0xf1;
     uint256 public constant PRICE_SCALE = 1e6;
-    /// @notice Live commitments one maker may hold in one market, across both outcomes and every funding token.
-    uint256 public constant MAX_OPEN_ORDERS = 16;
-    /// @dev Aqua marks a docked strategy with this token count; zero means it was never shipped.
-    uint8 private constant _DOCKED = 0xff;
     MarketRegistry public immutable registry;
 
     struct BuyStrategy {
@@ -62,30 +58,10 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         uint256 totalFilled
     );
 
-    /**
-     * @notice One admitted order's maximum remaining spend, in the single token that order can spend.
-     * @dev `token` is USDC for a BUY and the market's outcome token for a SELL, so a BUY of YES and a
-     *      BUY of NO in the same market share one budget while the two sell inventories stay apart.
-     *      A fixed-price order is a curve with equal endpoints and is stored the same way, which is
-     *      what keeps limit orders and curves inside one accounting.
-     */
-    struct Commitment {
-        address token;
-        uint8 flags;
-        uint32 startPrice;
-        uint32 endPrice;
-        uint64 maxShares;
-    }
-
-    mapping(bytes32 orderHash => Commitment) private _commitments;
-    mapping(address maker => mapping(address market => bytes32[])) private _open;
+    /// @notice The per-market order ledger this router enforces. Deployed with it and owned by it.
+    OrderBudget public immutable budget;
 
     error NotAdmitted();
-    error AlreadyAdmitted();
-    error StrategyNotShipped();
-    error NothingToCommit();
-    error TooManyOpenOrders();
-    error MarketBudgetExceeded(address token, uint256 spendable, uint256 committed, uint256 requested);
 
     /// @notice A maker's order became a live commitment against its market-and-token budget.
     event StrategyAdmitted(
@@ -98,160 +74,44 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         uint256 spendable
     );
 
-    /// @notice A cancelled or exhausted order stopped consuming budget. It can never fill again.
-    event StrategyReleased(bytes32 indexed orderHash, address indexed market, address indexed maker, address token);
-
-    /// @notice Whether this router will execute an order at all. Aqua publication alone is not enough.
-    function isAdmitted(bytes32 orderHash) public view returns (bool) {
-        return _commitments[orderHash].token != address(0);
-    }
-
-    function commitmentOf(bytes32 orderHash) external view returns (Commitment memory) {
-        return _commitments[orderHash];
-    }
-
-    /// @notice Every order this maker still has admitted in one market, both outcomes and both directions.
-    function openOrders(address maker, address market) external view returns (bytes32[] memory) {
-        return _open[maker][market];
-    }
-
-    /// @notice What the maker can actually spend now: allowance alone is not funding, and a balance
-    ///         the spender may not touch is not funding either.
-    function spendable(address maker, address token) public view returns (uint256) {
-        uint256 balance = IERC20(token).balanceOf(maker);
-        uint256 allowed = IERC20(token).allowance(maker, address(AQUA));
-        return balance < allowed ? balance : allowed;
-    }
-
-    /**
-     * @dev The exact remaining obligation of one admitted order, reconciled against Aqua. `terminal`
-     *      marks an order that can never spend again — docked by the maker, or filled to its size —
-     *      which is the only condition that releases a commitment. An order whose allocation has run
-     *      out contributes nothing but is not terminal, because a later Aqua push can refund it.
-     */
-    function _remaining(address maker, bytes32 orderHash, Commitment memory c)
-        private
-        view
-        returns (uint256 remaining, bool terminal)
-    {
-        (uint256 allocation, uint8 tokensCount) = AQUA.rawBalances(maker, address(this), orderHash, c.token);
-        uint256 filled = filledShares[orderHash];
-        if (tokensCount == 0 || tokensCount == _DOCKED || filled >= c.maxShares) return (0, true);
-        uint256 owed = c.flags & 2 != 0
-            ? CurveMath.cumulative(c.startPrice, c.endPrice, c.maxShares, c.flags >> 2, c.maxShares, true)
-                - CurveMath.cumulative(c.startPrice, c.endPrice, c.maxShares, c.flags >> 2, filled, true)
-            : c.maxShares - filled;
-        return (owed < allocation ? owed : allocation, false);
-    }
-
-    /// @notice Remaining commitment of one order, or zero once it is cancelled or exhausted.
-    function remainingCommitment(address maker, bytes32 orderHash) external view returns (uint256 remaining) {
-        Commitment memory c = _commitments[orderHash];
-        if (c.token == address(0)) return 0;
-        (remaining,) = _remaining(maker, orderHash, c);
-    }
-
-    /// @notice Everything this maker has already committed in one market against one funding token.
-    function committed(address maker, address market, address token)
-        public
-        view
-        returns (uint256 total, uint256 orders)
-    {
-        bytes32[] storage open = _open[maker][market];
-        for (uint256 i; i < open.length; ++i) {
-            Commitment memory c = _commitments[open[i]];
-            if (c.token != token) continue;
-            (uint256 remaining,) = _remaining(maker, open[i], c);
-            if (remaining == 0) continue;
-            total += remaining;
-            ++orders;
-        }
-    }
-
-    /**
-     * @notice The whole budget for one maker, market and funding token.
-     * @dev `available` is zero rather than negative when shared funds were spent elsewhere, withdrawn
-     *      or de-approved: the market is then over budget and admits nothing further until the maker
-     *      cancels an order or refunds the wallet. Nothing here is reserved, and USDC stays shared
-     *      with the same wallet's other markets.
-     */
-    function marketBudget(address maker, address market, address token)
-        external
-        view
-        returns (uint256 spendableAmount, uint256 committedAmount, uint256 available, uint256 orders)
-    {
-        spendableAmount = spendable(maker, token);
-        (committedAmount, orders) = committed(maker, market, token);
-        available = spendableAmount > committedAmount ? spendableAmount - committedAmount : 0;
-    }
-
-    /**
-     * @notice Drops every cancelled or exhausted order from a maker's market list. Permissionless:
-     *         it can only remove orders that are already unable to fill, and frees the maker's slots.
-     */
-    function releaseClosed(address maker, address market) public returns (uint256 removed) {
-        bytes32[] storage open = _open[maker][market];
-        for (uint256 i = open.length; i > 0;) {
-            --i;
-            bytes32 orderHash = open[i];
-            Commitment memory c = _commitments[orderHash];
-            (, bool terminal) = _remaining(maker, orderHash, c);
-            if (!terminal) continue;
-            open[i] = open[open.length - 1];
-            open.pop();
-            delete _commitments[orderHash];
-            unchecked {
-                ++removed;
-            }
-            emit StrategyReleased(orderHash, market, maker, c.token);
-        }
-    }
-
     /**
      * @notice Publishes an Aqua-shipped curve to this router, which is what makes it executable.
      * @dev The maker ships to Aqua first and admits second. Admission is where the per-market budget
      *      is enforced, and it is enforced here rather than in a service because Aqua's `ship` has no
-     *      application callback: anyone can ship a strategy naming this router without asking Horizon.
-     *      Two admissions racing each other cannot both pass, because the second one reads the first.
+     *      application callback: anyone can ship a strategy naming this router without asking
+     *      Horizon. An order that stops after shipping holds its allocation and never fills.
      */
     function admitCurve(CurveStrategy memory s) external returns (bytes32 orderHash) {
+        // `buildCurveOrder` validates the curve and that its market is registered, so it runs first.
         orderHash = keccak256(abi.encode(buildCurveOrder(msg.sender, s)));
-        address token = s.flags & 2 != 0 ? registry.usdc() : curveOutcome(s);
-        _admit(msg.sender, s.market, orderHash, Commitment(token, s.flags, s.startPrice, s.endPrice, s.maxShares));
+        if (!BinaryMarket(s.market).isOpen()) revert FillUnavailable();
+        bool buy = s.flags & 2 != 0;
+        uint256 filled = filledShares[orderHash];
+        // A BUY owes the exact integral over what it has left, a SELL the outcome tokens it has not
+        // delivered. Neither is the opening price times the size, nor the budget before it filled.
+        uint256 owed = buy ? curveCumulative(s, s.maxShares) - curveCumulative(s, filled) : s.maxShares - filled;
+        _admit(s.market, orderHash, buy ? registry.usdc() : curveOutcome(s), owed, s.flags);
     }
 
     /// @notice The same publication step for a Phase 1 fixed-price BUY, which is a flat curve here.
     function admitBuy(BuyStrategy memory s) external returns (bytes32 orderHash) {
-        if (s.maxShares > CurveMath.MAX_SHARES) revert InvalidStrategy();
         orderHash = keccak256(abi.encode(buildBuyOrder(msg.sender, s)));
-        uint8 flags = uint8(4 | 2 | (s.buyYes ? 1 : 0));
-        _admit(
-            msg.sender,
-            s.market,
-            orderHash,
-            Commitment(registry.usdc(), flags, s.price, s.price, uint64(s.maxShares))
-        );
+        if (!BinaryMarket(s.market).isOpen()) revert FillUnavailable();
+        uint256 price = s.price;
+        // Exactly the cumulative the BUY opcode charges, so what is owed matches what will be spent.
+        uint256 owed = uint256(s.maxShares) * price / PRICE_SCALE - filledShares[orderHash] * price / PRICE_SCALE;
+        _admit(s.market, orderHash, registry.usdc(), owed, uint8(4 | 2 | (s.buyYes ? 1 : 0)));
     }
 
-    function _admit(address maker, address market, bytes32 orderHash, Commitment memory c) private {
-        if (!BinaryMarket(market).isOpen()) revert FillUnavailable();
-        if (_commitments[orderHash].token != address(0)) revert AlreadyAdmitted();
-        (, uint8 tokensCount) = AQUA.rawBalances(maker, address(this), orderHash, c.token);
-        // An allocation the maker has not shipped, or has already docked, authorizes no spending.
-        if (tokensCount == 0 || tokensCount == _DOCKED) revert StrategyNotShipped();
-        (uint256 requested, bool terminal) = _remaining(maker, orderHash, c);
-        if (terminal || requested == 0) revert NothingToCommit();
-        releaseClosed(maker, market);
-        (uint256 committedAmount,) = committed(maker, market, c.token);
-        uint256 spendableAmount = spendable(maker, c.token);
-        if (committedAmount + requested > spendableAmount) {
-            revert MarketBudgetExceeded(c.token, spendableAmount, committedAmount, requested);
-        }
-        bytes32[] storage open = _open[maker][market];
-        if (open.length >= MAX_OPEN_ORDERS) revert TooManyOpenOrders();
-        open.push(orderHash);
-        _commitments[orderHash] = c;
-        emit StrategyAdmitted(orderHash, market, maker, c.token, requested, committedAmount, spendableAmount);
+    function _admit(address market, bytes32 orderHash, address token, uint256 owed, uint8 flags) private {
+        (uint256 commitment, uint256 before, uint256 spendable) =
+            budget.admit(msg.sender, market, orderHash, token, owed, flags);
+        emit StrategyAdmitted(orderHash, market, msg.sender, token, commitment, before, spendable);
+    }
+
+    /// @notice Frees the slots of orders that can no longer fill. Anyone may run it for any maker.
+    function releaseClosed(address maker, address market) external returns (uint256) {
+        return budget.releaseClosed(maker, market);
     }
 
     function curveOutcome(CurveStrategy memory s) public view returns (address) {
@@ -316,6 +176,7 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         AquaSwapVMRouter(aqua, address(0), owner, "Horizon", "1")
     {
         registry = registry_;
+        budget = new OrderBudget(AQUA);
     }
 
     function outcome(BuyStrategy memory strategy) public view returns (address) {
@@ -357,7 +218,7 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         }
         // Shipping to Aqua publishes an order; admitting it here is what makes it executable, and is
         // where its market budget was checked. An order that skipped that step never fills.
-        if (!isAdmitted(ctx.query.orderHash)) revert NotAdmitted();
+        if (!budget.isAdmitted(ctx.query.orderHash)) revert NotAdmitted();
         if (!BinaryMarket(strategy.market).isOpen()) revert FillUnavailable();
         if (!ctx.query.isExactIn || ctx.query.tokenIn != outcome(strategy) || ctx.query.tokenOut != registry.usdc()) {
             revert UnsupportedDirection();
@@ -372,6 +233,7 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         ctx.swap.amountOut = cost;
         if (!ctx.vm.isStaticContext) {
             filledShares[ctx.query.orderHash] = total;
+            budget.spend(ctx.query.orderHash, cost);
             emit BuyFilled(
                 ctx.query.orderHash, strategy.market, ctx.query.maker, strategy.buyYes, quantity, cost, total
             );
@@ -384,7 +246,7 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         if (ctx.query.orderHash != keccak256(abi.encode(buildCurveOrder(ctx.query.maker, s)))) {
             revert UnsupportedOrder();
         }
-        if (!isAdmitted(ctx.query.orderHash)) revert NotAdmitted();
+        if (!budget.isAdmitted(ctx.query.orderHash)) revert NotAdmitted();
         if (!BinaryMarket(s.market).isOpen()) revert FillUnavailable();
         bool buy = s.flags & 2 != 0;
         address token = curveOutcome(s);
@@ -402,6 +264,7 @@ contract HorizonSwapVM is AquaSwapVMRouter {
         else ctx.swap.amountIn = cost;
         if (!ctx.vm.isStaticContext) {
             filledShares[ctx.query.orderHash] = previous + q;
+            budget.spend(ctx.query.orderHash, buy ? cost : q);
             emit CurveFilled(ctx.query.orderHash, s.market, ctx.query.maker, q, cost, previous + q);
         }
     }

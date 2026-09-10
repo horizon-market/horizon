@@ -3,7 +3,7 @@ import { sepolia } from 'viem/chains';
 import { allocate, type Candidate, RoutingError } from './allocator.js';
 import { isBuy, isYes } from './math.js';
 import { GraphProvider } from './graph.js';
-import { routerAbi, routeAbi, marketAbi, registryAbi, aquaAbi } from './abi.js';
+import { routerAbi, routeAbi, marketAbi, orderBudgetAbi, registryAbi, aquaAbi } from './abi.js';
 
 export type TradingConfig = { rpc: string; graph: string; graphKey?: string; router: Address; executor: Address; registry: Address; aqua: Address; usdc: Address };
 export type QuoteInput = { market: Address; account: Address; recipient: Address; isYes: boolean; isBuy: boolean; shares: bigint; slippageBps: number };
@@ -26,6 +26,7 @@ export class QuoteService {
     if (!await read({ address: c.registry, abi: registryAbi, functionName: 'isMarket', args: [input.market] })) throw new RoutingError('unknown_market');
     if (!await read({ address: input.market, abi: marketAbi, functionName: 'isOpen' })) throw new RoutingError('market_closed');
     const token = await read({ address: input.market, abi: marketAbi, functionName: input.isYes ? 'yesToken' : 'noToken' }) as Address;
+    const ledger = await read({ address: c.router, abi: routerAbi, functionName: 'budget' }) as Address;
     const eligible = discovered.candidates.filter(s => input.isBuy
       ? (isBuy(s.strategy) ? isYes(s.strategy) !== input.isYes : isYes(s.strategy) === input.isYes)
       : isBuy(s.strategy) && isYes(s.strategy) === input.isYes);
@@ -36,6 +37,10 @@ export class QuoteService {
         const order = await read({ address: c.router, abi: routerAbi, functionName: 'buildCurveOrder', args: [item.maker, item.strategy] });
         const hash = keccak256(encodeAbiParameters(parseAbiParameters('(address maker,uint256 traits,bytes data)'), [order]));
         if (hash !== item.id) continue;
+        // Anyone can ship a strategy to Aqua naming this router. Only an order the router has
+        // admitted — the step that checks its market budget — can actually fill, so an indexed
+        // order that skipped it is not liquidity and never reaches the allocator.
+        if (!await read({ address: ledger, abi: orderBudgetAbi, functionName: 'isAdmitted', args: [hash] })) continue;
         const outcome = await read({ address: c.router, abi: routerAbi, functionName: 'curveOutcome', args: [item.strategy] }) as Address;
         const outputToken = isBuy(item.strategy) ? c.usdc : outcome;
         const inputToken = isBuy(item.strategy) ? outcome : c.usdc;

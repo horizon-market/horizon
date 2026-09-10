@@ -16,6 +16,7 @@ Read this roadmap and [PROJECT_BRIEF.md](/Users/xana/work/ethglobal2026/horizon/
 - Current status, September 9, 2026: **Phase 3 is complete apart from two credential-blocked flows, and Phase 4 verification and documentation are done**. On top of the live Phase 2 trading stack, an agent-owned client completed a real paid creation: 1 HBAR settled on Hedera testnet through Blocky402, a market was created on Sepolia under a creation id derived from its request id, and The Graph indexed it. The React application, the resumable creation workflow, and the operator screen all run against the live API. See [PHASE2.md](PHASE2.md) for the trading contracts and arithmetic, and [docs/EVIDENCE.md](docs/EVIDENCE.md) for the verified addresses, transactions and disclosed roles.
 - Next milestone: **close the four outstanding items and submit**. A browser-wallet Hedera payment (the WalletConnect client renders live requirements but has settled nothing yet), a World Selfie Check verification (fully implemented; `WORLD_SELFIE_ACCESS` is still `unknown`, so no credential has ever been verified and no discount granted), public HTTPS hosting, and the demo recording. A hosted-model drafting credential is also unconfigured, so the deterministic provider runs; it is grounded on the same live Graph data and labelled `development`.
 - Setup, test evidence, current limitations, and pending access: [OPERATIONS.md](OPERATIONS.md). Protocol source provenance: [contracts/README.md](contracts/README.md).
+- **Per-market order budgets, live since September 10, 2026**: maker orders carry a per-market budget enforced on chain when an order is admitted to the router, so publication is two transactions (`Aqua.ship`, then `HorizonSwapVM.admitCurve`) and an order the router has not admitted never fills. This took a new router (`0x2b7592171cc7cfaa21dd60b49c81d68cf584302d`), executor and Subgraph (`0.3.0`); the registry and its markets are unchanged, and orders published to the old router stay there. Rule: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#per-market-order-budgets). Deployment and live check: [OPERATIONS.md](OPERATIONS.md#per-market-order-budgets-deployed-september-10-2026).
 
 Useful continuation prompt:
 
@@ -158,6 +159,7 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 - Direct, complementary, and mixed buy routes settle atomically; forged callbacks or failed legs revert all effects.
 - User spending/output limits and deadlines are enforced on-chain.
 - Receiving outcomes never creates a sell authorization by itself.
+- Within one market, a maker's resting orders cannot commit more of a funding token than the wallet can currently spend, and the refusal is on chain rather than in the UI. USDC stays shared across markets.
 - Payment retries do not double-charge or create duplicate markets; failed creation remains recoverable after settlement.
 - Replayed verification cannot repeatedly redeem the same discount entitlement.
 - YES, NO, and INVALID payouts conserve collateral, including documented dust handling.
@@ -165,7 +167,7 @@ This is an aggressive dependency-ordered schedule, not evidence that any phase i
 
 ## Deferred features
 
-Autonomous matchers, automatic resale, continuous alpha control, routes spanning different markets, complementary sell-and-merge execution, decentralized disputes, mainnet rollout, and broad analytics are outside the four-day baseline. Do not silently remove one of the four required sponsor integrations to add these features.
+Autonomous matchers, automatic resale, continuous alpha control, routes spanning different markets, complementary sell-and-merge execution, decentralized disputes, mainnet rollout, and broad analytics are outside the four-day baseline. Order budgets are per market by design: nothing reserves funds globally, no order is deactivated automatically when a wallet is drained, and two markets racing for the same balance is not solved here. Do not silently remove one of the four required sponsor integrations to add these features.
 
 ## Updating the handoff
 

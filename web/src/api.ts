@@ -89,18 +89,46 @@ export type Quote = {
   transaction: { to: string; data: string; value: string };
   legs: { maker: string; shares: string; expectedFilled: string }[];
 };
+/** One order's remaining claim on its funding token, as the router's ledger reports it. */
+export type OrderCommitment = {
+  orderHash: string; token: string; side: 'YES' | 'NO'; direction: 'BUY' | 'SELL';
+  filled: string; owed: string; allocation: string; remaining: string; terminal: boolean;
+};
+/**
+ * One funding asset's budget in one market. USDC covers both outcomes, because a buy order spends
+ * USDC whichever side it names; each outcome token carries its own inventory. `spendable` is the
+ * lesser of the wallet balance and the Aqua allowance — an allowance is not money. Nothing here is
+ * reserved: the same USDC still backs this wallet's other markets.
+ */
+export type FundingBudget = {
+  asset: 'USDC' | 'YES' | 'NO'; token: string; decimals: number;
+  balance: string; allowance: string; spendable: string; committed: string; available: string;
+  overcommitted: boolean; orders: OrderCommitment[];
+};
+export type MarketBudgets = {
+  block: number; market: string; maker: string; spender: string; marketOpen: boolean;
+  usdc: FundingBudget; yes: FundingBudget; no: FundingBudget;
+};
 export type Publication = {
   strategy: { market: string; flags: number; startPrice: number; endPrice: number; maxShares: string; salt: string };
   orderHash: string; outcomeToken: string; tokens: string[]; amounts: string[]; shared: string;
-  readiness: 'ready' | 'approval_required' | 'insufficient_balance';
+  readiness: 'ready' | 'approval_required' | 'insufficient_balance' | 'over_budget';
+  /** What this order would commit, and what this market already has committed against the same asset. */
+  budget: FundingBudget & { block: number; requested: string; required: string; fits: boolean; shortfall: string };
   approval: { token: string; spender: string; amount: string };
-  transaction: { to: string; data: string; value: string }; fees: Fees;
+  /** Step one: the Aqua allocation. On its own this order can never fill. */
+  transaction: { to: string; data: string; value: string };
+  /** Step two: the Horizon router admits the order, which is where the market budget is enforced. */
+  admission: { to: string; data: string; value: string };
+  fees: Fees;
 };
 export type MakerCurve = {
   orderHash: string; market: string; question: string; side: 'YES' | 'NO'; direction: 'BUY' | 'SELL';
   shape: number; startPrice: number; endPrice: number; isLimit: boolean;
   maxShares: string; filled: string; remaining: string; active: boolean; publishedAt: number; closeAt: number;
   outcomeToken: string; marketStatus: 'OPEN' | 'CLOSED' | 'RESOLVED'; cancellable: boolean;
+  /** Admitted by the router. An order shipped to Aqua without that step holds funds but cannot fill. */
+  admitted: boolean; executable: boolean;
 };
 export type Position = { market: string; question: string; closeAt: number; status: string; result: string; yesToken: string; noToken: string; yes: string; no: string; redeemableUsdc: string };
 export type Redemption = { result: string; payoutUsdc: string; transaction: { to: string; data: string; value: string } };
@@ -202,6 +230,8 @@ export type OperatorCurve = {
   id: string; maker: string; market: string; question: string; flags: number; startPrice: number; endPrice: number;
   maxShares: string; filled: string; remaining: string; active: boolean; publishedAt: number; salt: string;
   side: 'YES' | 'NO'; direction: 'BUY' | 'SELL'; shape: number;
+  /** Shipped to Aqua and admitted by the router. Only an admitted order can fill. */
+  admitted: boolean;
 };
 export type OperatorFill = {
   id: string; strategy: string; maker: string; market: string; question: string; shares: string; usdc: string;
@@ -240,8 +270,10 @@ export const api = {
   event: (slug: string) => request<EventDetail>(`/api/events/${encodeURIComponent(slug)}`),
   positions: (account: string) => request<{ indexedBlock: number; positions: Position[] }>(`/api/positions/${account}`),
   makerCurves: (account: string) => request<{ indexedBlock: number; curves: MakerCurve[] }>(`/api/curves/${account}`),
+  marketBudgets: (market: string, maker: string) => request<MarketBudgets>(`/api/markets/${market}/budgets/${maker}`),
   quote: (input: { market: string; account: string; recipient: string; isYes: boolean; isBuy: boolean; shares: string; slippageBps: number }) => post<Quote>('/api/quotes', input),
-  publishCurve: (input: { maker: string; market: string; isYes: boolean; isBuy: boolean; startPrice: number; endPrice: number; shares: string; shape: number }) => post<Publication>('/api/curves', input),
+  /** `salt` re-prepares the same order rather than a new one, so a review survives an approval. */
+  publishCurve: (input: { maker: string; market: string; isYes: boolean; isBuy: boolean; startPrice: number; endPrice: number; shares: string; shape: number; salt?: string }) => post<Publication>('/api/curves', input),
   cancelCurve: (input: { maker: string; market: string; orderHash: string; outcomeToken: string }) => post<{ transaction: { to: string; data: string; value: string } }>('/api/curves/cancellations', input),
   redeem: (input: { account: string; market: string; recipient: string; yesShares: string; noShares: string }) => post<Redemption>('/api/redemptions', input),
   createDraft: (input: { question: string; requesterKind: 'browser' | 'agent'; requester: string; category?: string; closeAt?: string }, idempotencyKey: string) =>

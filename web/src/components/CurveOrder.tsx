@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, type Publication } from '../api';
-import { Notice, TransactionState, describe, type TxState } from './Ui';
+import type { MarketBudgets } from '../api';
+import { Notice } from './Ui';
 import { CurveEditor, curveProblems, decimal, micro, previewOf, reflect, type CurveDraft } from './CurveEditor';
+import { BudgetSection, PublishActions } from './FundingBudget';
+import { totalCost } from '../curve';
 import { parseUnits, priceUsdc, shares as formatShares, USDC_DECIMALS } from '../format';
-import { approve, confirm, describeWalletError, send } from '../wallet';
+import { usePublishCurve } from '../orders';
 
 type Side = { isYes: boolean; isBuy: boolean };
 
@@ -12,9 +14,11 @@ type Side = { isYes: boolean; isBuy: boolean };
  * the same review → approve → publish sequence as `LimitOrder`, against the same endpoint; the only
  * difference is that the start and end prices are allowed to differ, which is the whole feature.
  */
-export function CurveOrder({ market, side, account, book, onDone }: {
+export function CurveOrder({ market, side, account, book, budgets, onDone }: {
   market: string; side: Side; account?: string;
-  book: { ask: number | null; bid: number | null }; onDone: () => void;
+  book: { ask: number | null; bid: number | null };
+  /** Undefined while loading, null when the market's budget could not be read at all. */
+  budgets?: MarketBudgets | null; onDone: () => void;
 }) {
   // Opening prices come from the book, so the first curve a maker sees is already in the market
   // rather than at an arbitrary half a dollar.
@@ -26,10 +30,8 @@ export function CurveOrder({ market, side, account, book, onDone }: {
   const [flipped, setFlipped] = useState<string | undefined>();
   const [size, setSize] = useState('10');
   const [sizeTouched, setSizeTouched] = useState(false);
-  const [prepared, setPrepared] = useState<Publication | undefined>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const [tx, setTx] = useState<TxState>({ phase: 'idle' });
+  const publication = usePublishCurve(account, onDone);
+  const { prepared, error } = publication;
 
   // Buy and sell curves run in opposite directions, so a direction change has to move the end price
   // or the order collapses flat. `reflect` keeps the chosen shape and reports what it did.
@@ -42,7 +44,7 @@ export function CurveOrder({ market, side, account, book, onDone }: {
     });
   }, [side.isBuy]);
   // Nothing reviewed survives a change to what was reviewed.
-  useEffect(() => { setPrepared(undefined); setTx({ phase: 'idle' }); setError(undefined); }, [draft, size, side.isYes]);
+  useEffect(() => { publication.reset(); }, [draft, size, side.isYes]);
 
   const change = (patch: Partial<CurveDraft>) => {
     if (patch.start !== undefined || patch.end !== undefined) setFlipped(undefined);
@@ -61,35 +63,15 @@ export function CurveOrder({ market, side, account, book, onDone }: {
   const preview = amount.value ? previewOf(draft, amount.value) : undefined;
   const ready = Boolean(account) && !problems.start && !problems.end && !amount.error;
 
-  const review = async () => {
+  const review = () => {
     if (!account || !ready || !amount.value) return;
-    setError(undefined); setBusy(true);
-    try {
-      setPrepared(await api.publishCurve({
-        maker: account, market, isYes: side.isYes, isBuy: side.isBuy,
-        startPrice: micro(draft.start), endPrice: micro(draft.end),
-        shares: amount.value.toString(), shape: draft.shape,
-      }));
-    } catch (issue) { setError(issue instanceof ApiError ? describe(issue.code) : 'Could not prepare the curve.'); }
-    finally { setBusy(false); }
+    void publication.review({
+      maker: account, market, isYes: side.isYes, isBuy: side.isBuy,
+      startPrice: micro(draft.start), endPrice: micro(draft.end),
+      shares: amount.value.toString(), shape: draft.shape,
+    });
   };
 
-  const run = async (action: 'approve' | 'publish') => {
-    if (!account || !prepared) return;
-    setTx({ phase: 'signing' });
-    try {
-      const hash = action === 'approve'
-        ? await approve(account, prepared.approval.token, prepared.approval.spender, prepared.approval.amount)
-        : await send(account, prepared.transaction);
-      setTx({ phase: 'pending', hash });
-      const status = await confirm(account, hash);
-      if (status !== 'success') { setTx({ phase: 'error', hash, message: 'The transaction reverted.' }); return; }
-      setTx({ phase: 'confirmed', hash });
-      if (action === 'approve') await review(); else { setPrepared(undefined); onDone(); }
-    } catch (issue) { setTx({ phase: 'error', message: describeWalletError(issue) }); }
-  };
-
-  const working = tx.phase === 'signing' || tx.phase === 'pending';
   return (
     <div className="stack">
       <CurveEditor draft={draft} shares={amount.value ?? 10_000_000n} onChange={change} flipped={flipped} />
@@ -120,10 +102,10 @@ export function CurveOrder({ market, side, account, book, onDone }: {
         {side.isBuy && ' A resting bid also funds complementary minting for a trader buying the opposite outcome.'}
       </Notice>
       {!account && <Notice kind="info">Connect a wallet to publish a curve from your own account.</Notice>}
+      {account && <BudgetSection budgets={budgets} side={side} budget={prepared?.budget}
+        requested={prepared ? BigInt(prepared.budget.requested)
+          : preview ? (side.isBuy ? totalCost(preview) : preview.shares) : undefined} />}
       {error && <Notice kind="error">{error}</Notice>}
-      {prepared?.readiness === 'insufficient_balance' && (
-        <Notice kind="warn">Not enough {side.isBuy ? 'test USDC' : `${side.isYes ? 'YES' : 'NO'} tokens`} to back this curve.</Notice>
-      )}
       {prepared && (
         <dl className="kv">
           <dt>Prices</dt><dd>{priceUsdc(prepared.strategy.startPrice)} → {priceUsdc(prepared.strategy.endPrice)}</dd>
@@ -131,16 +113,8 @@ export function CurveOrder({ market, side, account, book, onDone }: {
           <dt>Order hash</dt><dd className="mono">{prepared.orderHash.slice(0, 18)}…</dd>
         </dl>
       )}
-      <TransactionState state={tx} />
-      {!prepared
-        ? <button className={`wide ${side.isBuy ? 'yes' : 'no'}`} disabled={busy || !ready}
-            onClick={() => void review()}>{busy ? 'Checking…' : 'Review curve'}</button>
-        : prepared.readiness === 'approval_required'
-          ? <button className="primary wide" disabled={working} onClick={() => void run('approve')}>
-              Approve {side.isBuy ? 'USDC' : 'outcome tokens'} for Aqua
-            </button>
-          : <button className={`wide ${side.isBuy ? 'yes' : 'no'}`} disabled={working || prepared.readiness !== 'ready'}
-              onClick={() => void run('publish')}>Publish curve</button>}
+      <PublishActions publication={publication} side={side} onReview={review}
+        canReview={Boolean(budgets) && ready} labels={{ review: 'Review curve', publish: 'Publish curve' }} />
     </div>
   );
 }

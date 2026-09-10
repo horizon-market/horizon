@@ -48,11 +48,13 @@ Alice has 50 USDC in her wallet and authorizes buying curves in markets A and B.
 
 USDC sharing is per wallet and per chain. It does not share money between unrelated users or bridge assets between the EVM trading network and Hedera. After a fill, refresh other affected quotes; Aqua strategy allocations alone are not authoritative wallet balances. See the [Aqua shared-liquidity overview](https://business.1inch.com/portal/documentation/aqua/overview).
 
+Sharing across markets is deliberate and is kept. Promising the same money twice **inside one market** is not. Every order a maker has resting in one market that spends the same token is added together, and a new one is refused unless the total still fits within `min(balance, allowance to Aqua)` for that token — so in market A those orders may commit at most Alice's 50 USDC, while market B may separately commit the same 50. A BUY spends USDC whichever outcome it names, so buying YES and buying NO share one budget; each outcome token is its own inventory. Obligations are the exact curve integral over the size an order has left, so a partial fill releases exactly what it spent and nothing more. The rule is enforced on chain when an order is admitted to the router, not in the service. `docs/ARCHITECTURE.md` states it in full, including what it deliberately does not do.
+
 ### Market-specific outcome inventory
 
 YES for market A is a different token from YES for market B. A Horizon strategy must pair the configured USDC contract with the registered YES or NO token of one market. Validate contract addresses and registry membership, never token symbols.
 
-A user acquiring YES now has inventory. That inventory becomes publicly offered sell liquidity only after the user authorizes a sell curve. Token-market validation naturally prevents cross-market outcome substitution; it does not by itself reserve a wallet's token balance exclusively for one of several sell orders. Outcome availability must also be refreshed when quoting.
+A user acquiring YES now has inventory. That inventory becomes publicly offered sell liquidity only after the user authorizes a sell curve. Token-market validation naturally prevents cross-market outcome substitution, and the per-market order budget keeps several sell orders on the same outcome from offering that inventory more than once: YES and NO are different tokens and therefore different budgets. Neither reserves the balance — outcome availability must still be refreshed when quoting, and no order is promised a fill.
 
 ### Complementary minting
 
@@ -91,6 +93,8 @@ Each strategy binds maker, market, outcome token, direction, price endpoints, sh
 ### Custom SwapVM responsibilities
 
 Extend official SwapVM with a Horizon pricing/validation instruction while retaining Aqua authorization and settlement. The extension must enforce market/token checks on the actual execution path, including attempts to submit unexpected programs or bypass the Horizon frontend. An arbitrary `Aqua.ship()` record is not sufficient proof of a valid Horizon market strategy.
+
+This is now literal rather than aspirational: `Aqua.ship` has no application callback, so a strategy naming the Horizon router can be published without asking Horizon at all. `HorizonSwapVM` therefore requires a second step, `admitCurve`, and refuses to fill any order that has not taken it. Admission is where the per-market order budget is checked, and it is the only place a publication can be refused for a reason the maker cannot route around. A shipped-but-unadmitted order holds its maker's Aqua allocation, commits nothing, is excluded from discovery and quoting, and can be docked to recover the allocation. The ledger itself lives in `OrderBudget`, a separate contract the router deploys and owns; keeping it out of the router is also what keeps the router inside the EIP-170 size limit.
 
 Phase 1 implements and locally tests output-first settlement and the pre-transfer-in callback in SwapVM: receive maker USDC, combine the trader's contribution, mint, and deliver the complementary outcome before completing the swap. `ComplementaryExecutor` binds the callback to its router, active order, maker, market-derived input token, amounts, and recipient; public execution uses a reentrancy guard. A failure in the final Aqua push rolls back minting and both contributions. This is local contract evidence, not a deployed sponsor demonstration.
 

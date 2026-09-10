@@ -70,6 +70,9 @@ test('real EVM: TypeScript arithmetic, indexed discovery, simulation, two fills,
       const order = await client.readContract({ address: router, abi: routerAbi, functionName: 'buildCurveOrder', args: [maker, strategy] });
       const encoded = encodeAbiParameters(parseAbiParameters('(address maker,uint256 traits,bytes data)'), [order]);
       await write(maker, aqua, aquaAbi, 'ship', [router, encoded, [no, usdc], [0n, cumulative(strategy, strategy.maxShares)]]);
+      // Shipping publishes the allocation; admitting it to the router is what makes it executable
+      // and is where this market's order budget is checked.
+      await write(maker, router, routerAbi, 'admitCurve', [strategy]);
       strategies.push({ id: keccak256(encoded), maker, market: { id: market }, flags: strategy.flags, startPrice: String(strategy.startPrice), endPrice: String(strategy.endPrice), maxShares: String(strategy.maxShares), salt: strategy.salt });
     }
     let badHash = false;

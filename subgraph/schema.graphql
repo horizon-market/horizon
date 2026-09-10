@@ -24,8 +24,13 @@ type Strategy @entity(immutable: false) {
   maxShares: BigInt!
   salt: Bytes!
   filled: BigInt!
+  # Shipped to Aqua and not docked. On its own this does not make an order executable.
   active: Boolean!
+  # Admitted by the Horizon router, which is where its market budget was checked. An order that
+  # was shipped straight to Aqua without this step can never fill and is not liquidity.
+  admitted: Boolean!
   publishedAt: BigInt!
+  admittedAt: BigInt
 }
 type Fill @entity(immutable: true) {
   id: Bytes!

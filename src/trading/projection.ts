@@ -28,7 +28,8 @@ export const toMarketRow = (market: ProjectedMarket, indexedBlock: number, synce
 export const toCurveRow = (curve: ProjectedCurve, indexedBlock: number, syncedAt: Date) => ({
   id: curve.id.toLowerCase(), marketAddress: curve.market.toLowerCase(), maker: curve.maker.toLowerCase(), flags: curve.flags,
   startPrice: curve.startPrice, endPrice: curve.endPrice, maxShares: curve.maxShares.toString(), filled: curve.filled.toString(),
-  salt: curve.salt, active: curve.active, publishedAt: instant(curve.publishedAt), indexedBlock, syncedAt,
+  salt: curve.salt, active: curve.active, admitted: curve.admitted,
+  publishedAt: instant(curve.publishedAt), indexedBlock, syncedAt,
 });
 
 type MarketRow = ReturnType<typeof toMarketRow>;
@@ -72,7 +73,8 @@ export class MarketProjectionStore {
       orderBy: { createdAt: 'desc' }, take: 50, include: { curves: { orderBy: { id: 'asc' } } },
     });
     return { block: state.checkpoint.indexedBlock, hash: state.checkpoint.indexedHash as Hex, syncedAt: state.checkpoint.syncedAt,
-      markets: rows.map(row => fromMarketRow(row, row.curves.filter(curve => curve.active))) };
+      // Depth is what can actually fill: shipped and not docked is not enough without admission.
+      markets: rows.map(row => fromMarketRow(row, row.curves.filter(curve => curve.active && curve.admitted))) };
   }
 
   /** Newest markets with their live curves, or null when the mirror is missing or stale. */
@@ -89,7 +91,8 @@ export class MarketProjectionStore {
     return { block: state.checkpoint.indexedBlock, hash: state.checkpoint.indexedHash as Hex, curves: rows.map(row => ({
       id: row.id as Hex, maker: row.maker as Address, market: row.marketAddress as Address, question: row.market.question,
       flags: row.flags, startPrice: row.startPrice, endPrice: row.endPrice, maxShares: BigInt(row.maxShares),
-      filled: BigInt(row.filled), active: row.active, publishedAt: seconds(row.publishedAt), salt: row.salt as Hex,
+      filled: BigInt(row.filled), active: row.active, admitted: row.admitted,
+      publishedAt: seconds(row.publishedAt), salt: row.salt as Hex,
       closeAt: seconds(row.market.closeAt), result: row.market.result,
       yesToken: row.market.yesToken as Address, noToken: row.market.noToken as Address,
     })) };

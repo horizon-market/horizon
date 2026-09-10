@@ -22,7 +22,7 @@ const marketAt = (byte: number, overrides: Partial<ProjectedMarket> = {}): Proje
 });
 const curveAt = (byte: number, market: ProjectedMarket, overrides: Partial<ProjectedCurve> = {}): ProjectedCurve => ({
   id: hex(byte, 32), market: market.id, maker: hex(0xd4, 20) as Address, flags: 6, startPrice: 400_000,
-  endPrice: 200_000, maxShares: 10_000_000n, filled: 0n, salt: hex(byte, 32), active: true,
+  endPrice: 200_000, maxShares: 10_000_000n, filled: 0n, salt: hex(byte, 32), active: true, admitted: true,
   publishedAt: 1_700_000_100 + byte, ...overrides,
 });
 
