@@ -1,0 +1,6 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "npm run build && npm --prefix web ci --include=dev && npm run web:build"
+  }
+}
