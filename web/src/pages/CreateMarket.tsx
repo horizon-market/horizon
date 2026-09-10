@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import type { RpContext } from '@worldcoin/idkit';
 import { api, ApiError, type CreationRequest, type PaymentRequirements, type PaymentResource } from '../api';
 import { useLocalState } from '../hooks';
+import { CREATION_LABEL, forgetCreation, isDiscardable, rememberCreation, type Saved } from '../creations';
 import { useConfig, useWallet } from '../App';
 import { Card, Notice, TxLink, describe } from '../components/Ui';
 import { dateTime, formatUnits } from '../format';
@@ -9,7 +10,6 @@ import { dateTime, formatUnits } from '../format';
 const WorldVerification = lazy(() => import('../components/WorldVerification').then(module => ({ default: module.WorldVerification })));
 
 const STEPS = ['Describe', 'Review draft', 'Verify (optional)', 'Pay', 'Market'] as const;
-type Saved = { id: string; token: string } | null;
 
 const stepFor = (request: CreationRequest | undefined) => {
   if (!request) return 0;
@@ -22,17 +22,20 @@ const stepFor = (request: CreationRequest | undefined) => {
 export function CreateMarket() {
   const config = useConfig();
   const wallet = useWallet();
-  const [saved, setSaved] = useLocalState<Saved>('horizon.creation', null);
+  const [saved, setSaved] = useLocalState<Saved | null>('horizon.creation', null);
   const [request, setRequest] = useState<CreationRequest | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  const release = () => { setSaved(null); setRequest(undefined); setLoaded(false); setError(undefined); };
+
   if (saved && !loaded) {
     setLoaded(true);
     api.getRequest(saved.id, saved.token).then(
-      result => setRequest(result.request),
-      () => { setSaved(null); setRequest(undefined); },
+      // A request discarded from another tab, or on a previous visit, never blocks the form again.
+      result => result.request.status === 'ABANDONED' ? release() : setRequest(result.request),
+      () => release(),
     );
   }
 
@@ -64,7 +67,10 @@ export function CreateMarket() {
       {error && <Notice kind="error">{error}</Notice>}
       {!request && <Describe busy={busy} account={wallet.account} onCreate={async input => {
         const result = await act(() => api.createDraft(input, crypto.randomUUID()));
-        if (result?.accessToken) { setSaved({ id: result.request.id, token: result.accessToken }); setRequest(result.request); }
+        if (result?.accessToken) {
+          const key = { id: result.request.id, token: result.accessToken };
+          rememberCreation(key); setSaved(key); setRequest(result.request);
+        }
         else if (result) setError('That draft already exists but its access token is not available in this browser.');
       }} />}
       {request && saved && (
@@ -80,7 +86,6 @@ export function CreateMarket() {
                 const result = await act(() => api.approve(saved.id, saved.token, request.draftHash!));
                 if (result) setRequest(result.request);
               }}>Approve and continue</button>
-              <button style={{ marginLeft: '.5rem' }} disabled={busy} onClick={() => { setSaved(null); setRequest(undefined); }}>Discard and start over</button>
             </Card>
           )}
           {request.status === 'APPROVED' && <Verification request={request} busy={busy} onVerified={setRequest} onSkip={async () => {
@@ -92,11 +97,44 @@ export function CreateMarket() {
             <Outcome request={request} busy={busy} onRefresh={async () => {
               const result = await act(() => api.getRequest(saved.id, saved.token));
               if (result) setRequest(result.request);
-            }} onReset={() => { setSaved(null); setRequest(undefined); }} />
+            }} onReset={release} />
           )}
+          <StartOver request={request} busy={busy} onRelease={release}
+            onDiscard={async () => {
+              const result = await act(() => api.abandon(saved.id, saved.token));
+              if (result) { forgetCreation(saved.id); release(); }
+            }} />
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The way out of a request the requester no longer wants. Before any money moves it is discarded
+ * outright, on the server as well as here, so the request cannot be resumed by accident and the
+ * payment intent behind it is cancelled. Once a payment has settled or is settling there is nothing
+ * to discard: the request is simply set aside, and its access token stays in this browser so the
+ * portfolio can still reach it.
+ */
+function StartOver({ request, busy, onDiscard, onRelease }: {
+  request: CreationRequest; busy: boolean; onDiscard: () => Promise<void>; onRelease: () => void;
+}) {
+  const discardable = isDiscardable(request.status, request.payment?.status);
+  if (request.status === 'CREATED') return null;
+  return (
+    <Card title="Start a different market">
+      <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+        {discardable
+          ? `This request is at “${CREATION_LABEL[request.status] ?? request.status}” and nothing has been charged for it.
+             Discarding it cancels its payment request and frees you to draft another.`
+          : `A payment for this request has settled or is settling, so it cannot be discarded. Setting it aside starts a
+             fresh request; this one keeps its place in your portfolio, where you can pick it up again.`}
+      </p>
+      {discardable
+        ? <button disabled={busy} onClick={() => void onDiscard()}>{busy ? 'Discarding…' : 'Discard this request'}</button>
+        : <button disabled={busy} onClick={onRelease}>Set aside and start another</button>}
+    </Card>
   );
 }
 

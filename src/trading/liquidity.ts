@@ -10,6 +10,33 @@ const remaining = (curve: ActiveCurve) => {
 };
 
 /**
+ * Equal endpoints never move with the fill, which is exactly a fixed-price limit order. Anything
+ * else reprices itself as it fills and belongs in the curve view, not in a price ladder.
+ */
+export const isLimitOrder = (curve: ActiveCurve) => curve.strategy.startPrice === curve.strategy.endPrice;
+
+export type CurveDescription = ActiveCurve & {
+  side: 'YES' | 'NO'; direction: 'BUY' | 'SELL'; shape: number;
+  isLimit: boolean; remaining: bigint; price: number;
+};
+
+/**
+ * Every resting order with capacity left, described individually rather than folded into levels.
+ * A ladder can only state one price per level, so a curve's whole remaining size would inherit its
+ * marginal price now; the market page needs the published parameters to draw the real function.
+ * Exhausted orders are dropped here for the same reason `summarize` skips them: they are history.
+ */
+export function describeCurves(curves: ActiveCurve[]): CurveDescription[] {
+  return curves.flatMap(curve => {
+    const left = remaining(curve);
+    if (left === 0n) return [];
+    return [{ ...curve, side: isYes(curve.strategy) ? 'YES' as const : 'NO' as const,
+      direction: isBuy(curve.strategy) ? 'BUY' as const : 'SELL' as const, shape: curve.strategy.flags >> 2,
+      isLimit: isLimitOrder(curve), remaining: left, price: marginalPrice(curve.strategy, curve.filled) }];
+  });
+}
+
+/**
  * Indexed display liquidity. Buying an outcome can use a SELL curve for that outcome or a BUY
  * curve for the opposite outcome, because complementary minting delivers the same token.
  * These figures come from The Graph and are discovery only: execution requires an RPC refresh
@@ -45,8 +72,8 @@ export type MarketBook = { yes: OutcomeBook; no: OutcomeBook };
 type Entry = { book: 'asks' | 'bids'; price: number; shares: bigint; source: 'direct' | 'complementary'; executable: boolean };
 
 /**
- * One outcome's book, with the other outcome's orders restated in this outcome's terms at
- * `1 - price`, the way a binary venue presents a single ladder.
+ * One outcome's limit-order book, with the other outcome's orders restated in this outcome's
+ * terms at `1 - price`, the way a binary venue presents a single ladder.
  *
  * The two complementary directions are not equally executable here:
  *
@@ -89,9 +116,17 @@ function ladder(entries: Entry[], book: 'asks' | 'bids'): BookLevel[] {
   return sorted.slice(0, 12);
 }
 
+/**
+ * Fixed-price depth only. A curve's marginal price describes one instant of its fill, so carrying
+ * it into a price level would claim its entire remaining size is available there — the opposite of
+ * what it will actually cost. Curves are filtered out before any level is aggregated, and reach the
+ * frontend through `describeCurves` instead. Execution is unaffected: the quote service routes
+ * against every active order regardless of how the page groups them.
+ */
 export function buildBook(curves: ActiveCurve[]): MarketBook {
+  const limits = curves.filter(isLimitOrder);
   const build = (wantYes: boolean): OutcomeBook => {
-    const entries = curves.flatMap(curve => entriesFor(curve, wantYes) ?? []);
+    const entries = limits.flatMap(curve => entriesFor(curve, wantYes) ?? []);
     const asks = ladder(entries, 'asks'), bids = ladder(entries, 'bids');
     const bestAsk = asks.find(level => level.executable)?.price;
     const bestBid = bids.find(level => level.executable)?.price;

@@ -42,6 +42,8 @@ model CreationRequest {
   verification HumanVerification?
 
   @@index([status, createdAt])
+  // A requester reads back their own creation history; the portfolio lists it newest first.
+  @@index([requester, createdAt])
 }
 
 // Exactly one payment intent per creation request; retries reuse it and never re-settle.

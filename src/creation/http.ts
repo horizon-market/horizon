@@ -46,6 +46,20 @@ export function present(request: PublicRequest) {
   };
 }
 
+/**
+ * A requester's own history. Deliberately narrower than `present`: it carries what identifies a
+ * request and what became of it, and leaves out the reviewed draft body, the settlement reference
+ * and the credential record, none of which a list needs.
+ */
+export function presentSummary(request: PublicRequest) {
+  return {
+    id: request.id, question: request.question, status: request.status, requesterKind: request.requesterKind,
+    marketAddress: request.marketAddress, priceUnits: request.priceUnits, discountBps: request.discountBps,
+    failureCode: request.failureCode, createdAt: request.createdAt, updatedAt: request.updatedAt,
+    paymentStatus: request.payment?.status ?? null, asset: request.payment?.asset ?? null,
+  };
+}
+
 export function creationRoutes(service?: CreationService) {
   const router = Router();
   if (!service) {
@@ -73,6 +87,14 @@ export function creationRoutes(service?: CreationService) {
     } catch (error) { fail(res, error); }
   });
 
+  /** Requests made by one requester. `/requests/:id` still needs the bearer token, this does not. */
+  router.get('/requests', steps, async (req, res) => {
+    const requester = z.string().trim().min(3).max(128).safeParse(req.query.requester);
+    if (!requester.success) { res.status(400).json({ error: 'invalid_requester' }); return; }
+    try { res.json(serialize({ requests: (await service.listByRequester(requester.data)).map(presentSummary) })); }
+    catch (error) { fail(res, error); }
+  });
+
   router.get('/requests/:id', steps, async (req, res) => {
     try { res.json(serialize({ request: present(await service.get(req.params.id!, bearer(req))) })); }
     catch (error) { fail(res, error); }
@@ -82,6 +104,11 @@ export function creationRoutes(service?: CreationService) {
     const input = approvalSchema.safeParse(req.body);
     if (!input.success) { res.status(400).json({ error: 'invalid_approval' }); return; }
     try { res.json(serialize({ request: present(await service.approve(req.params.id!, bearer(req), input.data.draftHash)) })); }
+    catch (error) { fail(res, error); }
+  });
+
+  router.post('/requests/:id/abandonment', steps, async (req, res) => {
+    try { res.json(serialize({ request: present(await service.abandon(req.params.id!, bearer(req))) })); }
     catch (error) { fail(res, error); }
   });
 

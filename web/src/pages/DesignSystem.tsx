@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { CurveChart } from '../components/CurveChart';
 import { OrderBook } from '../components/OrderBook';
+import { CurveLiquidity } from '../components/CurveLiquidity';
 import {
   Address, Badge, Card, Empty, Loading, Logo, Notice, TransactionState, TxLink, ZeroFee,
 } from '../components/Ui';
-import type { OutcomeBook } from '../api';
+import type { Curve, OutcomeBook } from '../api';
 import type { CurvePreview } from '../curve';
 
 /**
@@ -69,6 +70,27 @@ const BOOK: OutcomeBook = {
 };
 
 const CURVE: CurvePreview = { isBuy: true, startPrice: 620000, endPrice: 430000, shape: 2, shares: 25_000_000n };
+
+/**
+ * Four resting orders on one market, as `GET /api/markets/:id` describes them. The third rests on
+ * NO, so the YES view restates it, and the fourth is a fixed-price order that belongs in the ladder
+ * rather than in the chart — the split the curve card exists to make.
+ */
+const maker = (n: number) => `0x${n.toString(16).padStart(2, '0').repeat(20)}`;
+const RESTING: Curve[] = [
+  { id: '0xaa', maker: maker(0x1f), side: 'YES', direction: 'SELL', shape: 1, isLimit: false,
+    filled: '4000000', remaining: '16000000', price: 588000,
+    strategy: { market: maker(9), flags: 5, startPrice: 550000, endPrice: 740000, maxShares: '20000000', salt: '0x0' } },
+  { id: '0xbb', maker: maker(0x2c), side: 'YES', direction: 'BUY', shape: 2, isLimit: false,
+    filled: '0', remaining: '30000000', price: 540000,
+    strategy: { market: maker(9), flags: 11, startPrice: 540000, endPrice: 410000, maxShares: '30000000', salt: '0x0' } },
+  { id: '0xcc', maker: maker(0x3d), side: 'NO', direction: 'BUY', shape: 1, isLimit: false,
+    filled: '6000000', remaining: '6000000', price: 370000,
+    strategy: { market: maker(9), flags: 6, startPrice: 400000, endPrice: 340000, maxShares: '12000000', salt: '0x0' } },
+  { id: '0xdd', maker: maker(0x4e), side: 'YES', direction: 'SELL', shape: 1, isLimit: true,
+    filled: '0', remaining: '8000000', price: 610000,
+    strategy: { market: maker(9), flags: 5, startPrice: 610000, endPrice: 610000, maxShares: '8000000', salt: '0x0' } },
+];
 
 export function DesignSystem() {
   const [theme, setTheme] = useState<Theme>('system');
@@ -353,9 +375,13 @@ export function DesignSystem() {
 
       <section className="ds-section">
         <h2>Order book</h2>
+        <p className="small muted">
+          The ladder carries fixed-price orders only. A curve's price moves as it fills, so folding one into a level
+          would claim its whole remaining size is available at the price it happens to show now.
+        </p>
         <div className="split">
-          <Card title="Ladder · YES">
-            <OrderBook book={BOOK} isYes />
+          <Card title="Limit orders · YES">
+            <OrderBook book={BOOK} isYes curves={3} />
           </Card>
           <Card title="Order summary">
             <dl className="kv total">
@@ -369,7 +395,20 @@ export function DesignSystem() {
       </section>
 
       <section className="ds-section">
-        <h2>Curve chart</h2>
+        <h2>Curve liquidity</h2>
+        <p className="small muted">
+          One line per resting curve, on a share axis they all share. Hover picks the nearest line and dims the rest;
+          the legend and the slider reach the same readout without a pointer.
+        </p>
+        <div style={{ maxWidth: '38rem' }}>
+          <Card title="Curve liquidity · YES" actions={<span className="count">3</span>}>
+            <CurveLiquidity curves={RESTING} isYes tradable />
+          </Card>
+        </div>
+      </section>
+
+      <section className="ds-section">
+        <h2>Curve editor chart</h2>
         <div style={{ maxWidth: '30rem' }}>
           <CurveChart curve={CURVE} size={CURVE.shares} />
           <div className="chart-readout">

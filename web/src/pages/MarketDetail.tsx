@@ -6,6 +6,8 @@ import { Address, Badge, Card, ErrorBox, Fill, Loading, Notice, TransactionState
 import { isLive, useCancelCurve } from '../orders';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
 import { OrderBook } from '../components/OrderBook';
+import { CurveLiquidity } from '../components/CurveLiquidity';
+import { separate } from '../curve';
 import { approve, confirm, describeWalletError, send } from '../wallet';
 
 const RESULTS = ['Unresolved', 'YES', 'NO', 'INVALID'];
@@ -25,6 +27,8 @@ export function MarketDetail({ market }: { market: string }) {
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
   const data = detail.data!.market;
+  // The same split the API makes: fixed-price orders feed the ladder, curves feed the chart.
+  const resting = separate(data.curves, isYes);
   const refresh = () => { detail.reload(); mine.reload(); };
   return (
     <div className="stack">
@@ -61,19 +65,49 @@ export function MarketDetail({ market }: { market: string }) {
       </Card>
       <ZeroFee />
       <div className="split">
-        <Card title={`Order book · ${isYes ? 'YES' : 'NO'}`}>
-          <OrderBook book={isYes ? detail.data!.book.yes : detail.data!.book.no} isYes={isYes} />
-        </Card>
+        <div className="stack">
+          {/* Both cards read the outcome chosen in the trade ticket; they carry no selector of their own. */}
+          <Card title={`Limit orders · ${isYes ? 'YES' : 'NO'}`}>
+            <OrderBook book={isYes ? detail.data!.book.yes : detail.data!.book.no} isYes={isYes} curves={resting.curves.length} />
+          </Card>
+          <Card
+            title={`Curve liquidity · ${isYes ? 'YES' : 'NO'}`}
+            actions={<span className="count" aria-label={`${resting.curves.length} active curves`}>{resting.curves.length}</span>}
+          >
+            <p className="small muted" style={{ marginTop: 0 }}>
+              Each line is one order repricing as it fills, from where it stands now to the end of what it has left.
+            </p>
+            <CurveLiquidity curves={data.curves} isYes={isYes} tradable={data.status === 'OPEN'} />
+          </Card>
+        </div>
         <div className="stack">
           {data.status === 'OPEN'
             ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes}
                 account={account} position={mine.data?.position} onDone={refresh} />
-            : <Card title="Trading closed"><p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Portfolio</a>.</p></Card>}
+            : <Card title="Trading closed">
+                <p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="#/holdings">Portfolio</a>.</p>
+                {/* The ticket is what normally chooses the outcome, so a closed market lends its selector. */}
+                <OutcomeChoice isYes={isYes} onOutcome={setIsYes} />
+              </Card>}
           {account && (mine.data?.orders.length ?? 0) > 0 && (
             <YourOrders orders={mine.data!.orders} account={account} onDone={refresh} />
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The outcome the limit-order and curve cards are read through. It normally rides in the trade
+ * ticket, which is also where a trader picks the outcome to trade; a closed market has no ticket,
+ * so it renders this on its own rather than leaving the book stuck on YES.
+ */
+function OutcomeChoice({ isYes, onOutcome }: { isYes: boolean; onOutcome: (value: boolean) => void }) {
+  return (
+    <div className="seg" role="radiogroup" aria-label="Outcome">
+      <button role="radio" aria-checked={isYes} className={isYes ? 'active' : ''} onClick={() => onOutcome(true)}>YES</button>
+      <button role="radio" aria-checked={!isYes} className={!isYes ? 'active' : ''} onClick={() => onOutcome(false)}>NO</button>
     </div>
   );
 }
@@ -111,10 +145,7 @@ function OrderTicket({ market, book, isYes, onOutcome, account, position, onDone
         <button className={isBuy ? 'yes' : ''} onClick={() => setIsBuy(true)}>Buy</button>
         <button className={!isBuy ? 'no' : ''} onClick={() => setIsBuy(false)}>Sell</button>
       </div>
-      <div className="seg">
-        <button className={isYes ? 'active' : ''} onClick={() => onOutcome(true)}>YES</button>
-        <button className={!isYes ? 'active' : ''} onClick={() => onOutcome(false)}>NO</button>
-      </div>
+      <OutcomeChoice isYes={isYes} onOutcome={onOutcome} />
       <div className="book small muted">
         <span>Best ask <strong>{price(outcome.ask)}</strong></span>
         <span>Best bid <strong>{price(outcome.bid)}</strong></span>

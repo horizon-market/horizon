@@ -7,20 +7,23 @@ import { buildRequirements, decodePayment, paymentMatches, paymentNonce, payload
 import { createRpContext, proofSchema, VerificationRejectedError, VerificationUnavailableError, type HumanVerifier, type VerificationProof } from '../world/verifier.js';
 import type { MarketDeployer } from './onchain.js';
 
-export const STATUSES = ['DRAFT', 'APPROVED', 'PAYMENT_REQUIRED', 'PAYMENT_REVIEW', 'PAID', 'CREATING', 'CREATED', 'FAILED'] as const;
+export const STATUSES = ['DRAFT', 'APPROVED', 'PAYMENT_REQUIRED', 'PAYMENT_REVIEW', 'PAID', 'CREATING', 'CREATED', 'FAILED', 'ABANDONED'] as const;
 export type Status = typeof STATUSES[number];
-export type Event = 'approve' | 'require_payment' | 'settle' | 'review' | 'start_creation' | 'created' | 'fail' | 'retry';
+export type Event = 'approve' | 'require_payment' | 'settle' | 'review' | 'start_creation' | 'created' | 'fail' | 'retry' | 'abandon';
 
 /** The workflow only moves along declared edges, so no step can be skipped by an API caller. */
 export const TRANSITIONS: Record<Status, Partial<Record<Event, Status>>> = {
-  DRAFT: { approve: 'APPROVED' },
-  APPROVED: { require_payment: 'PAYMENT_REQUIRED' },
-  PAYMENT_REQUIRED: { settle: 'PAID', review: 'PAYMENT_REVIEW' },
+  DRAFT: { approve: 'APPROVED', abandon: 'ABANDONED' },
+  APPROVED: { require_payment: 'PAYMENT_REQUIRED', abandon: 'ABANDONED' },
+  PAYMENT_REQUIRED: { settle: 'PAID', review: 'PAYMENT_REVIEW', abandon: 'ABANDONED' },
   PAYMENT_REVIEW: { settle: 'PAID' },
   PAID: { start_creation: 'CREATING' },
   CREATING: { created: 'CREATED', fail: 'FAILED' },
   FAILED: { retry: 'CREATING' },
   CREATED: {},
+  // A requester walks away from their own request, and only before money moves: `abandon` exists on
+  // no status where a payment has settled or is in flight, so nothing paid for can be discarded.
+  ABANDONED: {},
 };
 
 export class WorkflowError extends Error {
@@ -98,6 +101,38 @@ export class CreationService {
 
   async get(id: string, token: string | undefined) { return this.load(id, token); }
 
+  /**
+   * The requester walks away from their own request, which is what frees them to draft another.
+   * `transition` is the gate: `abandon` is declared on no status where a payment has settled or is
+   * in flight, so a paid request can never be discarded and its money can never be stranded. The
+   * row is kept rather than deleted — the requester's own history should show what they abandoned.
+   */
+  async abandon(id: string, token: string | undefined) {
+    const request = await this.load(id, token);
+    if (request.status === 'ABANDONED') return request;
+    const status = transition(request.status as Status, 'abandon');
+    const payment = request.payment;
+    // An intent that was already claimed by a submission is settling somewhere; leave it alone.
+    if (payment && !['REQUIRED', 'FAILED'].includes(payment.status)) throw new WorkflowError('payment_in_progress_reconcile');
+    return this.deps.db.$transaction(async tx => {
+      if (payment) {
+        await tx.paymentIntent.update({ where: { id: payment.id, status: payment.status }, data: { status: 'CANCELLED', failureCode: 'request_abandoned' } });
+      }
+      return tx.creationRequest.update({ where: { id, status: request.status }, data: { status }, include: { payment: true, verification: true } });
+    });
+  }
+
+  /**
+   * Every request one requester has made, newest first. Read-only and identity-scoped the way
+   * `/api/positions/:account` and `/api/curves/:account` are; the per-request bearer token still
+   * gates every action, so listing a request never confers the ability to move it along.
+   */
+  async listByRequester(requester: string, take = 50) {
+    return this.deps.db.creationRequest.findMany({
+      where: { requester }, orderBy: { createdAt: 'desc' }, take, include: { payment: true, verification: true },
+    });
+  }
+
   async worldContext(id: string, token: string | undefined) {
     const request = await this.load(id, token);
     if (request.status !== 'APPROVED') throw new WorkflowError('verification_not_available_for_status', 409);
@@ -121,6 +156,7 @@ export class CreationService {
   /** Verification is optional. It only affects price after the server confirms the credential. */
   async verify(id: string, token: string | undefined, proof: VerificationProof) {
     const request = await this.load(id, token);
+    if (request.status === 'ABANDONED') throw new WorkflowError('request_abandoned', 409);
     if (request.payment) throw new WorkflowError('verification_after_payment_requirements', 409);
     if (!this.deps.verifier.available) throw new WorkflowError('verification_unavailable', 503);
     let result;
@@ -144,6 +180,8 @@ export class CreationService {
    */
   async requirePayment(id: string, token: string | undefined, resource: string) {
     const request = await this.load(id, token);
+    // Checked before the replay shortcut: an abandoned request keeps its cancelled intent on file.
+    if (request.status === 'ABANDONED') throw new WorkflowError('request_abandoned', 409);
     if (request.payment) return { request, payment: request.payment, replay: true };
     transition(request.status as Status, 'require_payment');
     if (!this.deps.payments.payTo) throw new WorkflowError('payment_receiver_not_configured', 503);
@@ -190,6 +228,7 @@ export class CreationService {
    */
   async submitPayment(id: string, token: string | undefined, header: string, resource: string) {
     const request = await this.load(id, token);
+    if (request.status === 'ABANDONED') throw new WorkflowError('request_abandoned', 409);
     const payment = request.payment;
     if (!payment) throw new WorkflowError('payment_not_required_yet', 409);
     if (payment.status === 'SETTLED') return { request, payment, settlement: undefined, replay: true };

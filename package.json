@@ -24,7 +24,7 @@
     "admin:password": "tsx scripts/admin-password.ts",
     "job:probe": "tsx --env-file=.env scripts/enqueue-probe.ts",
     "doctor": "tsx --env-file=.env scripts/doctor.ts",
-    "test": "node --import tsx --test test/unit.test.ts test/trading.test.ts test/creation.test.ts test/projection.test.ts",
+    "test": "node --import tsx --test test/unit.test.ts test/trading.test.ts test/liquidity.test.ts test/creation.test.ts test/projection.test.ts",
     "test:routes": "node --import tsx --test test/routes.integration.test.ts",
     "subgraph:prepare": "node --env-file-if-exists=.env --import tsx scripts/subgraph-prepare.ts",
     "subgraph:codegen": "graph codegen subgraph/subgraph.yaml --output-dir subgraph/generated",

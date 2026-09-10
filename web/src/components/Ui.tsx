@@ -64,6 +64,7 @@ const MESSAGES: Record<string, string> = {
   unknown_request: 'That creation request no longer exists in this browser session.',
   unknown_market: 'That market is not registered with the Horizon registry.',
   market_closed: 'Trading in this market has closed.',
+  request_abandoned: 'That creation request was discarded and cannot be continued. Start a new one.',
   market_unresolved: 'This market has not been resolved yet.',
   draft_hash_mismatch: 'The draft changed after it was displayed. Reload and review it again.',
   verification_unavailable: 'World verification is unavailable, so the discount cannot be applied.',

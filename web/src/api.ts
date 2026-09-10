@@ -1,3 +1,5 @@
+import type { DescribedOrder } from './curve';
+
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
 }
@@ -20,7 +22,15 @@ export type AppConfig = {
   resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string };
 };
 export type SideLiquidity = { ask: number | null; bid: number | null; availableShares: string };
-export type Curve = { id: string; maker: string; filled: string; strategy: { market: string; flags: number; startPrice: number; endPrice: number; maxShares: string; salt: string } };
+/**
+ * One resting order with capacity left. `isLimit` separates a fixed-price order — which belongs in
+ * the ladder — from a curve, which reprices as it fills and is drawn from `strategy` instead.
+ * `price` is the marginal price at `filled` right now. The reading half of the shape lives in
+ * `curve.ts`, which is where the market page's chart and split read it from.
+ */
+export type Curve = DescribedOrder & {
+  strategy: DescribedOrder['strategy'] & { market: string; flags: number; salt: string };
+};
 export type Market = {
   id: string; question: string; rules: string; evidenceSource: string; closeAt: number; resolver: string;
   yesToken: string; noToken: string; result: number; resolutionEvidence: string; collateral: string; createdAt: number;
@@ -65,6 +75,13 @@ export type CreationRequest = {
   verification: { credentialType: string; verifier: string; verifiedAt: string } | null;
   payment: { status: string; network: string; asset: string; amountUnits: string; payTo: string; facilitator: string; transactionRef: string | null; payer: string | null; settledAt: string | null; failureCode: string | null; attempts: number } | null;
   fees: Fees;
+};
+/** One row of a requester's own creation history; the full request still needs its access token. */
+export type CreationSummary = {
+  id: string; question: string; status: string; requesterKind: string;
+  marketAddress: string | null; priceUnits: string; discountBps: number;
+  failureCode: string | null; createdAt: string; updatedAt: string;
+  paymentStatus: string | null; asset: string | null;
 };
 export type PaymentResource = { url: string; description?: string; mimeType?: string };
 export type PaymentRequirements = { scheme: string; network: string; amount: string; payTo: string; maxTimeoutSeconds: number; asset: string; extra: { feePayer?: string; nonce: string; assetDecimals: number; settlementMode: string } };
@@ -114,6 +131,8 @@ export const api = {
   createDraft: (input: { question: string; requesterKind: 'browser' | 'agent'; requester: string; category?: string; closeAt?: string }, idempotencyKey: string) =>
     post<{ request: CreationRequest; accessToken?: string; replay: boolean }>('/api/creation/requests', input, { 'idempotency-key': idempotencyKey }),
   getRequest: (id: string, token: string) => request<{ request: CreationRequest }>(`/api/creation/requests/${id}`, { headers: { authorization: `Bearer ${token}` } }),
+  myCreations: (requester: string) => request<{ requests: CreationSummary[] }>(`/api/creation/requests?requester=${encodeURIComponent(requester)}`),
+  abandon: (id: string, token: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/abandonment`, {}, { authorization: `Bearer ${token}` }),
   approve: (id: string, token: string, draftHash: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/approval`, { draftHash }, { authorization: `Bearer ${token}` }),
   verify: (id: string, token: string, proof: unknown) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/verification`, { proof }, { authorization: `Bearer ${token}` }),
   worldContext: (id: string, token: string) => post<{ rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string }>(

@@ -3,7 +3,7 @@ import { sepolia } from 'viem/chains';
 import { GraphProvider, type IndexedMarket, type IndexedSnapshot } from './graph.js';
 import type { MarketProjectionStore } from './projection.js';
 import { cumulative, type Curve } from './math.js';
-import { buildBook, summarize, type MarketLiquidity } from './liquidity.js';
+import { buildBook, describeCurves, summarize, type CurveDescription, type MarketLiquidity } from './liquidity.js';
 import { aquaAbi, marketAbi, registryAbi, routerAbi } from './abi.js';
 import type { TradingConfig } from './service.js';
 
@@ -12,7 +12,9 @@ export const RESULTS = ['UNRESOLVED', 'YES', 'NO', 'INVALID'] as const;
 export type PublishInput = { maker: Address; market: Address; isYes: boolean; isBuy: boolean; startPrice: number; endPrice: number; shares: bigint; shape: number; salt?: Hex };
 export type RedeemInput = { account: Address; market: Address; yesShares: bigint; noShares: bigint; recipient: Address };
 
-export type MarketSummary = IndexedMarket & { liquidity: MarketLiquidity; status: 'OPEN' | 'CLOSED' | 'RESOLVED' };
+export type MarketSummary = Omit<IndexedMarket, 'curves'> & {
+  liquidity: MarketLiquidity; status: 'OPEN' | 'CLOSED' | 'RESOLVED'; curves: CurveDescription[];
+};
 /** Which store answered a read: the local mirror, or The Graph directly. */
 export type Source = 'projection' | 'graph';
 export type { IndexedSnapshot };
@@ -57,9 +59,14 @@ export class MarketService {
       markets: state.checkpoint?.markets ?? 0, curves: state.checkpoint?.curves ?? 0 };
   }
 
-  private decorate(markets: IndexedMarket[]) {
+  /**
+   * `curves` leaves here described one by one, not aggregated: the market page draws each pricing
+   * function from its own parameters, and only fixed-price orders belong in a price ladder.
+   */
+  private decorate(markets: IndexedMarket[]): MarketSummary[] {
     const now = Math.floor(Date.now() / 1000);
-    return markets.map(market => ({ ...market, status: status(market, now), liquidity: summarize(market.curves) }));
+    return markets.map(market => ({ ...market, status: status(market, now),
+      liquidity: summarize(market.curves), curves: describeCurves(market.curves) }));
   }
 
   async list() {
