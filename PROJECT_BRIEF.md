@@ -2,7 +2,7 @@
 
 Planning snapshot: **September 8, 2026**. Event: **ETHOnline 2026**. Team: **one human builder with AI assistance**. Original delivery window: **four days**.
 
-This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](/Users/xana/work/ethglobal2026/horizon/README.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Update September 9: **Phase 2 is implemented and verified live**: curve presets, direct/complementary routes, shared-wallet-aware quoting, Sepolia contracts, and a live Subgraph. [PHASE2.md](PHASE2.md) records interfaces, arithmetic, API usage, transaction evidence, and scope limits. React, AI-assisted creation, live Hedera payments, and World verification remain Phase 3 work.
+This document preserves the conversation so a new task can continue without rediscovering the idea. Read [README.md](README.md) and [docs/ROADMAP.md](docs/ROADMAP.md) for the roadmap and [OPERATIONS.md](OPERATIONS.md) for setup, evidence, and limitations. Update September 9: **Phase 2 is implemented and verified live**: curve presets, direct/complementary routes, shared-wallet-aware quoting, Sepolia contracts, and a live Subgraph. [PHASE2.md](PHASE2.md) records interfaces, arithmetic, API usage, transaction evidence, and scope limits. React, AI-assisted creation, live Hedera payments, and World verification remain Phase 3 work.
 
 ## 1. Product thesis
 
@@ -243,17 +243,17 @@ Open work that should not restart product discovery:
 6. **Resolution timing:** define the close/resolution schedule and behavior if the admin does not resolve. An oracle/dispute system is out of scope, but the UI must disclose dependence on the resolver.
 7. **Submission provenance:** document actual reuse and choose the pool that matches it. Do not assume a new folder by itself establishes Start Fresh eligibility.
 
-## 9. Local references and what has actually been inspected
+## 9. References and what has actually been inspected
 
-- [Aqua checkout](/Users/xana/work/ethglobal2026/aqua): read for the wallet-based allocation and transfer model.
-- [SwapVM checkout](/Users/xana/work/ethglobal2026/swap-vm): inspected for output-first settlement and pre-transfer-in callbacks.
-- [ArcBook reference](/Users/xana/work/ethglobal2026/liquid_OB/README.md): prior-event project with curves, a solver, atomic batch execution, and indexing. Its automatic two-sided inventory recycling is not Horizon's selected behavior.
+- **1inch Aqua sources**: read for the wallet-based allocation and transfer model. The pinned copies live in `contracts/vendor`; provenance is in [contracts/README.md](contracts/README.md).
+- **SwapVM sources**: inspected for output-first settlement and pre-transfer-in callbacks.
+- **ArcBook**: a prior-event project with curves, a solver, atomic batch execution, and indexing, consulted as a reference only. Its automatic two-sided inventory recycling is not Horizon's selected behavior.
 
 Observed checkout HEADs during planning were Aqua `9c5c42e5840e8741fba3597c48456c9510212b66` and SwapVM `9502fd44254fef12fa448c3059868505b4c9dfff`. Implementation pins SwapVM at that revision and Aqua at its declared dependency, `v1.0.0` / `098b4c5d8eec67677f7ca861ca991af56024d9c5`. Exact origins, licenses, and retained source hashes are recorded in `contracts/vendor-lock.json` and `contracts/README.md`. These are source pins, not verified deployments. The newer SwapVM API differs from ArcBook's older integration.
 
 Horizon now compiles under Node 24.10.0/TypeScript 5.9.3 and Solidity 0.8.30/Foundry 1.2.3. Two unit tests, three actual PostgreSQL integration tests, and three protocol tests pass locally. The custom test router enables LimitSwap through `_runOpcode`; the default Aqua dispatcher omits it. Tests establish token transfers, callback ordering, and shared-wallet depletion using mock assets. They do not prove a backed complementary match. Wallet payment integration, public deployment, live Graph/World flows, and the complete product remain unimplemented. See OPERATIONS.md for exact commands and pending prerequisites.
 
-Consult applicable local instructions before implementation. The user-provided workspace instruction references `/Users/xana/.codex/RTK.md`, which requires shell commands to be prefixed with `rtk`. If operating inside the SwapVM checkout, also read its own `AGENTS.md`.
+Consult applicable repository instructions before implementation. When working inside the upstream SwapVM checkout, also read its own `AGENTS.md`.
 
 Other primary references:
 

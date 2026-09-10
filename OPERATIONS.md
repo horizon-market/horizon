@@ -9,7 +9,7 @@ Local Git history preserves the work in increments: `209555f` records the planni
 Use Node **24.10.0** (`.nvmrc`) and npm **11.6.1**. The workspace also has Node 26 on its default PATH; select Node 24 before running npm. Do not upgrade Prisma independently of the AdminJS adapter.
 
 ```sh
-cd /Users/xana/work/ethglobal2026/horizon
+cd horizon
 source ~/.nvm/nvm.sh
 nvm use
 export PATH="$NVM_BIN:$PATH"
