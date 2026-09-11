@@ -167,9 +167,10 @@ the market created on Sepolia under a creation id derived from its request id, a
 Graph. The frontend covers browsing, a market detail and order ticket, curve publishing, holdings
 and redemption, the creation workflow and an operator screen.
 
-World Selfie Check access has been granted for this app, and a credential has been verified end
+World Selfie Check access has been granted for this app, and the verified-human path has run end
 to end in Sandbox against the production deployment: the RP context, the widget, the server-side
-`action`/`environment`/`signal_hash` checks and the nullifier record all ran on the live path.
+`action`/`environment`/`signal_hash` checks and the nullifier record, followed by a creation paid
+at the discounted price over Hedera x402.
 
 Implemented but not yet exercised live: a browser-wallet Hedera settlement (the client renders
 live payment requirements but has settled nothing). Drafting runs its deterministic provider,

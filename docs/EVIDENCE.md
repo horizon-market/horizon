@@ -205,9 +205,10 @@ These are implemented but not yet demonstrated live, and are reported as `pendin
   payment screen renders live requirements including the facilitator's fee payer, but no
   browser-wallet settlement has been completed and recorded. It needs a funded testnet wallet and
   a human approval.
-- **World Selfie Check.** Access is granted and a credential has been verified end to end in
-  Sandbox against the production deployment. What remains is a discounted creation paid through
-  to a deployed market. See [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md).
+- **World Selfie Check.** Access is granted, a credential has been verified in Sandbox against
+  the production deployment, and a creation has been paid at the discounted price. The
+  transaction and request ids are not yet recorded here. See
+  [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md).
 - **Hosted-model drafting.** No AI credential is configured, so the deterministic provider runs.
   It is grounded on the same live Graph data and is labelled `development` wherever it appears.
 - **Demo recording.**
