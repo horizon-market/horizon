@@ -45,6 +45,7 @@ set `WEB_ORIGIN` to that origin so credentialed cross-origin requests are accept
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY` | With a credential, drafting calls the model provider. Without one, a deterministic provider runs, still grounded on live indexed markets. |
 | `EVM_DEPLOYER_PRIVATE_KEY` | Registry owner and disclosed resolver. Used only by the API/worker; it never reaches a browser. |
 | `HEDERA_AUDIT_TOPIC_ID`, `HEDERA_AUDIT_ACCOUNT_ID`, `HEDERA_AUDIT_PRIVATE_KEY` | The public creation audit trail on HCS. With all three, statements are published to the topic; without them they are still recorded and can be published later. The signer's key is the topic's submit key and stays server-side. |
+| `STREAM_ENABLED`, `SUBSTREAMS_API_TOKEN` or `SUBSTREAMS_API_KEY`, `SUBSTREAMS_PACKAGE` | The live layer: a third process (`npm run stream:dev`) records chain events as blocks arrive and open tabs update over SSE. Without it every read is served from the periodic index alone, exactly as before. See "Live layer" in `OPERATIONS.md`. |
 
 Secrets live in `.env` and `.local/`, both git-ignored. No user wallet key is ever sent to the
 server: browser trades and curve publications are signed in the user's own wallet, and the Hedera

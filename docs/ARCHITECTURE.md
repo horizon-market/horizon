@@ -12,8 +12,10 @@ for the market-creation service, which is a separate paid service on Hedera.
 | --- | --- |
 | API (`src/server.ts`) | REST under `/api`, the built frontend, AdminJS inspection at `/admin`, and enqueueing durable work. |
 | Worker (`src/worker.ts`) | pg-boss consumers for market creation and market resolution. Runs the only two operations that hold a server-side key. |
+| Stream consumer (`src/stream-consumer.ts`) | One Substreams connection, kept open. Records every block's Horizon events in the live layer and wakes the API through Postgres. Holds no key. |
 | PostgreSQL | Service workflow state: creation requests, payment intents, verification results, discount usage, resolutions, job runs, admin audit. Never a source of truth for balances or payouts. |
 | Subgraph | Indexes markets, curves, fills, routes, collateral and resolution for discovery. |
+| Substreams package (`substreams/`) | The `horizon_events` Rust module: the same contract events, extracted per block for the stream consumer. |
 
 ## Trust boundaries
 
@@ -29,6 +31,66 @@ for the market-creation service, which is a separate paid service on Hedera.
 - **Resolution is centralized and disclosed.** A named resolver submits YES, NO or INVALID with an
   evidence reference after close. INVALID pays 0.5 USDC per outcome token. There is no dispute
   process in this release, and the UI says so.
+
+## Live layer
+
+Discovery is served from a mirror of the Subgraph that the worker rebuilds on a timer
+(`syncMarkets`), or from the Subgraph directly when the mirror is stale. Both are complete
+through one block and nothing newer. The live layer is what closes that gap: a market created,
+a curve filled or a route executed a few seconds ago is visible before the indexer has it, and
+without waiting for a sweep.
+
+**Ownership.** `MarketProjection`, `CurveProjection` and `SyncCheckpoint` belong to the sync
+sweep, which deletes any row The Graph did not return. The stream consumer never writes them. It
+writes `LiveChange` (one row per change to one market or curve, keyed by the transaction and log
+that produced it), `Trade` (one row per `RouteExecuted`), `Notification` (the creator's notice)
+and `LiveEvent` (the SSE replay log), plus its own `StreamCheckpoint` cursor. Every write for one
+block is one transaction with the cursor, so a crash can only replay a block, and a replayed
+block creates nothing: each row's key is what identifies it on chain.
+
+**The overlay rule.** A read takes whichever snapshot answers — mirror or Graph — and applies
+the live changes whose block is newer than the snapshot's block (`applyOverlay`,
+`src/trading/overlay.ts`). Nothing older applies: the snapshot already carries it. A market
+change for an address the snapshot lacks adds the market; a curve change patches `filled`,
+`active` and `admitted`, and a curve that is no longer executable drops out, by the same rule the
+snapshot applies. The result has exactly a Graph read's shape, so nothing downstream can tell the
+two apart. When a sweep reaches a change's block, the change is retired inside the sweep's
+transaction: the snapshot now carries it itself. Retirement is a cleanup; correctness rests on
+the block comparison alone, which is why a sweep that lags the stream can neither hide a live
+market nor duplicate a fill.
+
+**Each event.** `MarketCreated` records the market and, when its registry key (or, for a request
+that predates the key, its address) names a creation request, writes the creator's notice and
+patches the event child's address — one child at a time, never waiting for the group.
+`CurveFilled` patches the curve and announces `liquidity.changed` for its market and for every
+other market where that maker has executable depth, because one wallet backs all of them; a
+block's worth of fills coalesces to one message per market. `RouteExecuted` is the trade; the
+fills inside it are neither trades nor volume. `Shipped` is decoded through the router's
+`decodeCurveOrder`, as the Subgraph mapping decodes it; `StrategyAdmitted`, `Docked`,
+`CollateralChanged` and `MarketResolved` patch what they name. Quotes are untouched: a quote
+still reads the chain at one block and simulates the route; a live message only tells the open
+ticket to ask again.
+
+**Finality.** Blocks are consumed live, not final-only. A change is shown as soon as its block
+is seen and carries `final: false` until the stream's own final-block height passes it. A
+`BlockUndoSignal` deletes the changes above the last valid block, marks the trades reverted
+(they never leave the table, and never reach history again), removes a notice that only the
+stream vouched for, and tells open pages to correct themselves.
+
+**One notice, two witnesses.** The deployment receipt in the worker and the stream both announce
+"your market was created", by the same key — the request, the child position and the market
+address. Whichever arrives first creates the notice in its own transaction; the second merges
+its source into it. The notice says *created*: whether the market can be traded is a separate
+fact, decided by executable liquidity, and never claimed here.
+
+**Delivery.** Every SSE message is a `LiveEvent` row written in the block's transaction, and
+`pg_notify` fires on commit. The API's `LiveBus` holds one `LISTEN` connection and, on every
+wake-up, reads the log forward from the last id it delivered — so a lost notification costs
+nothing, and a browser that reconnects with `Last-Event-ID` is replayed what it missed or told
+`snapshot.required` when the log no longer reaches back that far. The subscription is a `POST`:
+creation tokens travel in the body, never in a URL, and are checked against their hashes
+exactly as every other creation call checks them. Knowing a request id, or a wallet address,
+subscribes to nothing.
 
 ## Trading
 

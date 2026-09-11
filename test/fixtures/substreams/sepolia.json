@@ -1,0 +1,266 @@
+{
+  "network": "sepolia",
+  "router": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+  "executor": "0x657b5cf110bed745c5b3f33c77d61855abb4cfa9",
+  "recordedAt": "2026-09-11T13:26:07.192Z",
+  "head": 11682200,
+  "transactions": [
+    "0x12c16730ad67d6cfe355964986b76cc46ff3e905a9f91df0de4097cc8cee0f24",
+    "0x2e900ea408e38742cdb03c995d76064b658426c800235e3ed26020f53672bf7e",
+    "0x72c1af4d50709ccb57bb8b22257b0a612048185bcd63df13c86bfd3f73edb6ac",
+    "0x761e02156c7374724c070972d41fd90578af8060ea7b704a083352564969ebf0",
+    "0x90e52b4fc4b6d825a4fbe698a68d092bc52d7c9ee41e633e67b8c2570590a6e5",
+    "0x96a1e410865eb69f5cea9871fbfec6296adb0dda32f629ca433fdf642ea03ca0",
+    "0xc4fe069cfb41fed031926905c6ef74cd625e29ec13fac6efaf01c41b4ae7d78a",
+    "0xe9b801444b9192df3e367adce3b14c356a8ddf37c3a9ff576278af2a69a67562",
+    "0xed0bf5613c24e2f73b1819a1454dbb557e3e0d7fa74171aaf3e01d8bd7af561d"
+  ],
+  "blocks": [
+    {
+      "number": 11674059,
+      "hash": "0x36fe09245dfd6e321a42c044b426292f0bd9fa6ee8969caf8cec2a83eef20d77",
+      "timestamp": 1789032516,
+      "output": {
+        "events": [
+          {
+            "kind": "MARKET_CREATED",
+            "contract": "0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1",
+            "blockNumber": "11674059",
+            "blockHash": "0x36fe09245dfd6e321a42c044b426292f0bd9fa6ee8969caf8cec2a83eef20d77",
+            "blockTimestamp": "1789032516",
+            "txHash": "0xc4fe069cfb41fed031926905c6ef74cd625e29ec13fac6efaf01c41b4ae7d78a",
+            "logIndex": 247,
+            "txIndex": 93,
+            "marketCreated": {
+              "creationId": "0x198ae4855e839ead18b674b690a96a4706bb18c06a6895a49f9103558b3f992a",
+              "market": "0x2cd0f62990c950528fdf27d78b06992b805bcab9",
+              "resolver": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "yesToken": "0x66ae7637ad510c0363a2f52e371ea601cbab9792",
+              "noToken": "0x0e0bdd69451f9a030892b5ec613907ae1d6c333d",
+              "closeAt": "1789635600",
+              "question": "Liverpool FC – Fulham FC?",
+              "rules": "YES resolves if, at or before 2026-09-17T09:00:00.000Z, the stated condition of \"Liverpool FC – Fulham FC?\" is established by the named evidence source. NO resolves if the condition is not established by that time. INVALID resolves, paying 0.5 USDC per outcome token, if the evidence source cannot settle the question unambiguously or the question turns out to be undecidable as written. The disclosed Horizon resolver submits the result with an evidence reference after trading closes; there is no dispute process in this release.",
+              "evidenceSource": "Primary public record named by the requester, checked by the disclosed Horizon resolver at close."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676110,
+      "hash": "0x4a29b87fb1d048234d536da34e3a38fe741a09ea54d4cecd2e388d8d5640dcfe",
+      "timestamp": 1789057824,
+      "output": {
+        "events": [
+          {
+            "kind": "MARKET_CREATED",
+            "contract": "0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1",
+            "blockNumber": "11676110",
+            "blockHash": "0x4a29b87fb1d048234d536da34e3a38fe741a09ea54d4cecd2e388d8d5640dcfe",
+            "blockTimestamp": "1789057824",
+            "txHash": "0xed0bf5613c24e2f73b1819a1454dbb557e3e0d7fa74171aaf3e01d8bd7af561d",
+            "logIndex": 166,
+            "txIndex": 84,
+            "marketCreated": {
+              "creationId": "0x6fc2cdad02a63d2a3facb89b6be02b7f460fde0f94e0a997047bd5fd8cb2c65e",
+              "market": "0xbadcc50e06d721d75e677463660734a45b6c7a6f",
+              "resolver": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "yesToken": "0x2c00d2ea2431862fa2b8cc9a8445324cfc3d8286",
+              "noToken": "0x0f5e93f9ba58f1583bd749b54293f0865135e29b",
+              "closeAt": "1789221600",
+              "question": "Will Fulham FC win on 2026-09-12?",
+              "rules": "In the upcoming game, scheduled for September 12, 2026\nIf Fulham FC wins, this market will resolve to \"Yes\".\nOtherwise, this market will resolve to \"No\".\nIf the game is postponed, this market will remain open until the game has been completed.\nIf the game is canceled entirely, with no make-up game, this market will resolve \"No\".\nThis market refers only to the outcome within the first 90 minutes of regular play plus stoppage time.\n\nThe primary resolution source for this market is the official statistics of the event as recognized by the governing body or event organizers. However, if the governing body or event organizers have not published final match statistics within 2 hours after the event's conclusion, data from Flashscore may be used; if Flashscore data is unavailable, data from Sofascore may be used; if neither is available, a consensus of credible reporting may be used instead. All markets will settle based on the official final result as recognized by the governing body or event organizers. Revisions to officially declared final scores made after market resolution will not be accounted for in determining the outcome.\n\nHorizon settlement: after trading closes, the disclosed Horizon resolver submits YES, NO or INVALID against the criteria above together with an evidence reference. INVALID pays 0.5 USDC per outcome token and is the result whenever those criteria cannot settle the question unambiguously — including cancellation of the underlying event where the criteria above do not already decide it. Horizon does not delegate settlement to Polymarket, UMA or any other oracle, and this release has no dispute process.",
+              "evidenceSource": "https://www.premierleague.com/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676111,
+      "hash": "0xfdc6854b5b8e284b7dcd888d3d23fe31bc8fc872e495b9920597ac0cc8f3ecf5",
+      "timestamp": 1789057836,
+      "output": {
+        "events": [
+          {
+            "kind": "MARKET_CREATED",
+            "contract": "0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1",
+            "blockNumber": "11676111",
+            "blockHash": "0xfdc6854b5b8e284b7dcd888d3d23fe31bc8fc872e495b9920597ac0cc8f3ecf5",
+            "blockTimestamp": "1789057836",
+            "txHash": "0x761e02156c7374724c070972d41fd90578af8060ea7b704a083352564969ebf0",
+            "logIndex": 425,
+            "txIndex": 163,
+            "marketCreated": {
+              "creationId": "0xceeafd514576e8d86fbb26ace2291e8d59ea02f6d01266d828f86d267bbf474e",
+              "market": "0xcfba7bd25b405e44984c02fc932dc81cb4baa7f2",
+              "resolver": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "yesToken": "0x7302c5c65ee91ad46aed68a474c6031ba5758a9d",
+              "noToken": "0x4c9bcd4b733824debf26a157bee17e6961228476",
+              "closeAt": "1789221600",
+              "question": "Will Liverpool FC win on 2026-09-12?",
+              "rules": "In the upcoming game, scheduled for September 12, 2026\nIf Liverpool FC wins, this market will resolve to \"Yes\".\nOtherwise, this market will resolve to \"No\".\nIf the game is postponed, this market will remain open until the game has been completed.\nIf the game is canceled entirely, with no make-up game, this market will resolve \"No\".\nThis market refers only to the outcome within the first 90 minutes of regular play plus stoppage time.\n\nThe primary resolution source for this market is the official statistics of the event as recognized by the governing body or event organizers. However, if the governing body or event organizers have not published final match statistics within 2 hours after the event's conclusion, data from Flashscore may be used; if Flashscore data is unavailable, data from Sofascore may be used; if neither is available, a consensus of credible reporting may be used instead. All markets will settle based on the official final result as recognized by the governing body or event organizers. Revisions to officially declared final scores made after market resolution will not be accounted for in determining the outcome.\n\nHorizon settlement: after trading closes, the disclosed Horizon resolver submits YES, NO or INVALID against the criteria above together with an evidence reference. INVALID pays 0.5 USDC per outcome token and is the result whenever those criteria cannot settle the question unambiguously — including cancellation of the underlying event where the criteria above do not already decide it. Horizon does not delegate settlement to Polymarket, UMA or any other oracle, and this release has no dispute process.",
+              "evidenceSource": "https://www.premierleague.com/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676112,
+      "hash": "0x7ed0c4ad2e96dcf65328e9e4b4a11e579e67dc81ec86748f7c8ce1351508f0e2",
+      "timestamp": 1789057848,
+      "output": {
+        "events": [
+          {
+            "kind": "MARKET_CREATED",
+            "contract": "0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1",
+            "blockNumber": "11676112",
+            "blockHash": "0x7ed0c4ad2e96dcf65328e9e4b4a11e579e67dc81ec86748f7c8ce1351508f0e2",
+            "blockTimestamp": "1789057848",
+            "txHash": "0x96a1e410865eb69f5cea9871fbfec6296adb0dda32f629ca433fdf642ea03ca0",
+            "logIndex": 150,
+            "txIndex": 85,
+            "marketCreated": {
+              "creationId": "0xc930992fb5aca8c0fe0e7c119edb91b4fec2820b819c4dbaf0a10fcfecb09581",
+              "market": "0xd7d8de9a9584b477f0282dfc67374cbb53f25289",
+              "resolver": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "yesToken": "0x9358ee7c2cb5cb6b684be905e3f01f8a0639361f",
+              "noToken": "0xc75280fc2c4cec62e7bebc1bc3ae0082b47e9270",
+              "closeAt": "1789221600",
+              "question": "Will Liverpool FC vs. Fulham FC end in a draw?",
+              "rules": "In the upcoming game, scheduled for September 12, 2026\nIf the game ends in a draw, this market will resolve to \"Yes\".\nOtherwise, this market will resolve to \"No\".\nIf the game is postponed, this market will remain open until the game has been completed.\nIf the game is canceled entirely, with no make-up game, this market will resolve to \"Yes\".\nThis market refers only to the outcome within the first 90 minutes of regular play plus stoppage time.\n\nThe primary resolution source for this market is the official statistics of the event as recognized by the governing body or event organizers. However, if the governing body or event organizers have not published final match statistics within 2 hours after the event's conclusion, data from Flashscore may be used; if Flashscore data is unavailable, data from Sofascore may be used; if neither is available, a consensus of credible reporting may be used instead. All markets will settle based on the official final result as recognized by the governing body or event organizers. Revisions to officially declared final scores made after market resolution will not be accounted for in determining the outcome.\n\nHorizon settlement: after trading closes, the disclosed Horizon resolver submits YES, NO or INVALID against the criteria above together with an evidence reference. INVALID pays 0.5 USDC per outcome token and is the result whenever those criteria cannot settle the question unambiguously — including cancellation of the underlying event where the criteria above do not already decide it. Horizon does not delegate settlement to Polymarket, UMA or any other oracle, and this release has no dispute process.",
+              "evidenceSource": "https://www.premierleague.com/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676412,
+      "hash": "0xb955d3a4c7d829ea0a94036c269fcf0462cb344d2dc13210a3adb550966d8629",
+      "timestamp": 1789061496,
+      "output": {
+        "events": [
+          {
+            "kind": "SHIPPED",
+            "contract": "0x1111113ccf1426a8e30e2bff5e005d929bf6a90a",
+            "blockNumber": "11676412",
+            "blockHash": "0xb955d3a4c7d829ea0a94036c269fcf0462cb344d2dc13210a3adb550966d8629",
+            "blockTimestamp": "1789061496",
+            "txHash": "0xe9b801444b9192df3e367adce3b14c356a8ddf37c3a9ff576278af2a69a67562",
+            "logIndex": 378,
+            "txIndex": 155,
+            "shipped": {
+              "maker": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "app": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+              "strategyHash": "0xbe1b70dc7fc918f1d07c2591045d70f776cd972a62a9327bedb16d4e3b7739b6",
+              "strategy": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000243fbaee0e81efbc5900f0934f6f4aa66a249d314000000000280028002800280000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000ea1c7d4b196cb0c7b01d743fbc6116a902379c72386a917e260caa60e1edac2a7a14d7ec53e9a622f0f1c0000000000000000000000000bc7c4cc7e0f944053bfa0607592ef4cf215c758e0000000000000000000000000000000000000000000000000000000000000007000000000000000000000000000000000000000000000000000000000004baf0000000000000000000000000000000000000000000000000000000000004baf000000000000000000000000000000000000000000000000000000000017d784011b3e0035186b6644df22cb7ae5104d355923e8b686458efa4e031e89df809d300000000000000000000000000000000000000000000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676413,
+      "hash": "0xfcde9c7c2860637044533e68ccdc35094a790c4d09e16ca5c1ff3bbb3e82f69d",
+      "timestamp": 1789061508,
+      "output": {
+        "events": [
+          {
+            "kind": "STRATEGY_ADMITTED",
+            "contract": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+            "blockNumber": "11676413",
+            "blockHash": "0xfcde9c7c2860637044533e68ccdc35094a790c4d09e16ca5c1ff3bbb3e82f69d",
+            "blockTimestamp": "1789061508",
+            "txHash": "0x90e52b4fc4b6d825a4fbe698a68d092bc52d7c9ee41e633e67b8c2570590a6e5",
+            "logIndex": 289,
+            "txIndex": 130,
+            "strategyAdmitted": {
+              "orderHash": "0xbe1b70dc7fc918f1d07c2591045d70f776cd972a62a9327bedb16d4e3b7739b6",
+              "market": "0xbc7c4cc7e0f944053bfa0607592ef4cf215c758e",
+              "maker": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+              "commitment": "7750000",
+              "committedBefore": "0",
+              "spendable": "7750000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676414,
+      "hash": "0xb1c53cc8022fc1fbeb765a7966f0110bc24f0b721b7e16a2c00e501e79a52052",
+      "timestamp": 1789061520,
+      "output": {
+        "events": [
+          {
+            "kind": "SHIPPED",
+            "contract": "0x1111113ccf1426a8e30e2bff5e005d929bf6a90a",
+            "blockNumber": "11676414",
+            "blockHash": "0xb1c53cc8022fc1fbeb765a7966f0110bc24f0b721b7e16a2c00e501e79a52052",
+            "blockTimestamp": "1789061520",
+            "txHash": "0x72c1af4d50709ccb57bb8b22257b0a612048185bcd63df13c86bfd3f73edb6ac",
+            "logIndex": 171,
+            "txIndex": 117,
+            "shipped": {
+              "maker": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "app": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+              "strategyHash": "0xad5b822b6e25f3ca3833ffabc70a7b82997171039afbff24aea9b61b808cd29a",
+              "strategy": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000243fbaee0e81efbc5900f0934f6f4aa66a249d314000000000280028002800280000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000ea1c7d4b196cb0c7b01d743fbc6116a902379c7238681141c275c983a57500805168e3720e400b06b1f1c0000000000000000000000000bc7c4cc7e0f944053bfa0607592ef4cf215c758e00000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000f424058b6fadcea27cc78871fcc150f0b613fdd250f932aeff5241aaf1d2325b97f0000000000000000000000000000000000000000000000"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676415,
+      "hash": "0xf71260aab2bcfcadb94f4e6750e51335601a6e1c4c82aaddee297f52b21efb37",
+      "timestamp": 1789061532,
+      "output": {
+        "events": [
+          {
+            "kind": "DOCKED",
+            "contract": "0x1111113ccf1426a8e30e2bff5e005d929bf6a90a",
+            "blockNumber": "11676415",
+            "blockHash": "0xf71260aab2bcfcadb94f4e6750e51335601a6e1c4c82aaddee297f52b21efb37",
+            "blockTimestamp": "1789061532",
+            "txHash": "0x12c16730ad67d6cfe355964986b76cc46ff3e905a9f91df0de4097cc8cee0f24",
+            "logIndex": 167,
+            "txIndex": 99,
+            "docked": {
+              "maker": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "app": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+              "strategyHash": "0xbe1b70dc7fc918f1d07c2591045d70f776cd972a62a9327bedb16d4e3b7739b6"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "number": 11676416,
+      "hash": "0xa15e8c6aa1356a9d7bfecd35a99d26e0f2214efed44fbe355fa4c8f604b26f96",
+      "timestamp": 1789061544,
+      "output": {
+        "events": [
+          {
+            "kind": "DOCKED",
+            "contract": "0x1111113ccf1426a8e30e2bff5e005d929bf6a90a",
+            "blockNumber": "11676416",
+            "blockHash": "0xa15e8c6aa1356a9d7bfecd35a99d26e0f2214efed44fbe355fa4c8f604b26f96",
+            "blockTimestamp": "1789061544",
+            "txHash": "0x2e900ea408e38742cdb03c995d76064b658426c800235e3ed26020f53672bf7e",
+            "logIndex": 415,
+            "txIndex": 134,
+            "docked": {
+              "maker": "0x243fbaee0e81efbc5900f0934f6f4aa66a249d31",
+              "app": "0x2b7592171cc7cfaa21dd60b49c81d68cf584302d",
+              "strategyHash": "0xad5b822b6e25f3ca3833ffabc70a7b82997171039afbff24aea9b61b808cd29a"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
