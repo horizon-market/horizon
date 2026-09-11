@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ApiError, type AuditEventView, type AuditTrail } from '../api';
-import { Badge, Card, Notice, describe } from './Ui';
+import { Badge, Card, HelpLink, Notice, describe } from './Ui';
 import { dateTime, short } from '../format';
 
 // ---------------------------------------------------------------------------
@@ -65,15 +65,18 @@ export function AuditTrailCard({ audit: initial, verify, highlightAddress, outco
     <Card
       id={id}
       title="Public audit trail"
-      actions={verify && audit.available && published(audit) > 0
-        ? <button disabled={busy} onClick={() => void check()}>{busy ? 'Checking…' : 'Verify on the mirror node'}</button>
-        : undefined}
+      actions={
+        <span className="row">
+          <HelpLink href="/audit">How the audit trail works</HelpLink>
+          {verify && audit.available && published(audit) > 0 && (
+            <button disabled={busy} onClick={() => void check()}>{busy ? 'Checking…' : 'Verify on the mirror node'}</button>
+          )}
+        </span>
+      }
     >
       <p className="small muted">
         Hedera Consensus Service records <strong>Horizon&rsquo;s own statements</strong> about this request and the order in
-        which it made them. It does not independently verify the Hedera payment, the Sepolia deployment, or the eventual
-        outcome of a market &mdash; each of those is checked at its own source, and the references published here are what
-        let you check them.
+        which it made them &mdash; not the payment, the deployment or the outcome, each of which is checked at its own source.
       </p>
       {audit.available
         ? <p className="small muted">

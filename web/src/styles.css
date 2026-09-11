@@ -413,6 +413,8 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: va
   border-radius: var(--radius-lg); box-shadow: var(--shadow-1); padding: var(--space-4);
 }
 .card + .card { margin-top: var(--space-4); }
+/* Inside a grid the gap is the spacing; the sibling margin would lift the first card alone. */
+.grid > .card + .card { margin-top: 0; }
 /* A card lays its children out in normal flow, where the total panel and a notice
    carry no margin of their own: a control or note placed straight after one paints
    its border flush on the panel's and the two read as a single overlapping box.

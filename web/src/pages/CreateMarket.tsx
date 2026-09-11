@@ -8,7 +8,7 @@ import {
 import { useLocalState } from '../hooks';
 import { CREATION_LABEL, forgetCreation, isDiscardable, rememberCreation, type Saved } from '../creations';
 import { useConfig, useWallet } from '../App';
-import { Address, Badge, Card, Notice, TxLink, describe } from '../components/Ui';
+import { Address, Badge, Card, HelpLink, Notice, TxLink, describe } from '../components/Ui';
 import { AuditTrailCard } from '../components/AuditTrail';
 import { dateTime, formatUnits } from '../format';
 
@@ -851,6 +851,12 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
             <dt>Facilitator</dt><dd>{config.creation.facilitator} ({requirements.extra.settlementMode})</dd>
             <dt>Discount</dt><dd>{request.discountBps > 0 ? `${request.discountBps / 100}% applied` : 'not applied'} — {request.discountNote}</dd>
           </dl>
+          {config.audit.available && (
+            <p className="small muted">
+              Your approval, this payment and each deployment become statements on a public Hedera topic.{' '}
+              <HelpLink href="/audit">How the audit trail works</HelpLink>
+            </p>
+          )}
           {config.creation.settlementMode === 'simulated'
             ? <div className="stack">
                 <Notice kind="warn">Development settlement: authorizing here records a simulated payment and performs no Hedera transaction.</Notice>

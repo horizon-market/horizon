@@ -281,6 +281,13 @@ status, requester, tokens and payment details are never included. The event and 
 these to show the trail beside the markets it is about; a market that predates the trail simply
 shows none.
 
+`/audit` explains the trail the way `/curves` explains curves: by doing it. The page reads the
+latest messages on the topic straight from the mirror node **in the browser** — the request never
+passes through Horizon — decodes each one, and recomputes its `eventId` from the published recipe,
+so the derivation is demonstrated rather than asserted. It is linked from every audit card, from the
+payment step, and from the footer; it is deliberately not a second help link in the top bar, which
+is reserved for what a trader must understand to trade.
+
 ### Configuration
 
 `HEDERA_AUDIT_TOPIC_ID`, `HEDERA_AUDIT_ACCOUNT_ID` and `HEDERA_AUDIT_PRIVATE_KEY` configure a

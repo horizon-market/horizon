@@ -8,6 +8,7 @@ import { MarketDetail } from './pages/MarketDetail';
 import { EventDetail } from './pages/EventDetail';
 import { Holdings } from './pages/Holdings';
 import { Curves } from './pages/Curves';
+import { Audit } from './pages/Audit';
 import { CreateMarket } from './pages/CreateMarket';
 import { Admin } from './pages/Admin';
 import { DesignSystem } from './pages/DesignSystem';
@@ -86,7 +87,8 @@ export function App() {
       </main>
       <footer>
         Horizon settles on Ethereum Sepolia with test USDC. Markets are resolved by a disclosed centralized resolver;
-        INVALID pays 0.5 USDC per outcome token. Zero trading fees; market creation is a separate paid service.
+        INVALID pays 0.5 USDC per outcome token. Zero trading fees; market creation is a separate paid service, and
+        every creation is recorded on a public Hedera topic — <a href="/audit">how the audit trail works</a>.
       </footer>
     </div>
   );
@@ -102,6 +104,7 @@ function Page({ route }: { route: ReturnType<typeof useRoute> }) {
   if (section === 'events' && parameter) return <EventDetail key={parameter} slug={parameter} />;
   if (section === 'holdings') return <Holdings query={route.query} />;
   if (section === 'curves') return <Curves />;
+  if (section === 'audit') return <Audit />;
   // Curves are published from the market they belong to now, so the old standalone address forwards
   // into that market's ticket rather than dying.
   if (section === 'publish') return <Redirect to={publishTarget(route.query)} />;
