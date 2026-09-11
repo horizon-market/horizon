@@ -45,8 +45,8 @@ and figures at each step: [`deployments/order-budget-evidence.json`](../deployme
 
 ## Indexing
 
-Subgraph Studio version `0.3.1`, queried live at
-`https://api.studio.thegraph.com/query/1758973/horizon/0.3.1`. This is a working Studio
+Subgraph Studio version `0.3.2`, queried live at
+`https://api.studio.thegraph.com/query/1758973/horizon/0.3.2`. This is a working Studio
 deployment, not a claim of decentralized-network publication. It indexes markets, curves, fills,
 routes, collateral and resolution, and validates Aqua publications against the deployed router
 rather than trusting arbitrary `Shipped` bytes. It also records `Strategy.admitted` from the

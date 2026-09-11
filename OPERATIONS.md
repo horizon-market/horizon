@@ -245,7 +245,7 @@ which is deployed and wired:
 | `OrderBudget` | `0x563D51c62260F484C5765712fd9716704cF266A2` |
 | `RouteExecutor` | `0x657b5cf110bed745c5b3f33c77d61855abb4cfa9` |
 | `MarketRegistry` | `0xa1151c78bf5ba0ce80b1f78626c4c0f2c7d131a1` — unchanged |
-| Subgraph | Studio `0.3.1`, `https://api.studio.thegraph.com/query/1758973/horizon/0.3.1` |
+| Subgraph | Studio `0.3.2`, `https://api.studio.thegraph.com/query/1758973/horizon/0.3.2` |
 
 `deploy:phase2` skips contracts already recorded in `deployments/sepolia.json`, so the router and
 executor were cleared from it first and moved to `superseded`. The registry was deliberately left in
@@ -295,6 +295,21 @@ Notes for whoever runs it next:
   router-facing sources at `routerBlock`. Studio keeps indexing the superseded version and the two
   compete for a free-tier slot, so `0.3.1` is currently syncing slowly. Archiving `0.3.0` in the
   Studio web UI frees that capacity — there is no CLI or API for it.
+- **`0.3.2` replaces `0.3.1`, which died on its first Aqua `Docked` event.** The manifest had mapped
+  `Docked → handleDock` since the Graph mappings landed, but the handler itself was only added to
+  `subgraph/src/mapping.ts` afterwards, so the `0.3.1` WASM never exported it. Graph Node accepts
+  such a manifest and fails permanently at the first matching event (`function handleDock not found`);
+  `graph build` does not catch it. After touching the manifest generator, grep the built WASM for
+  every handler it names before deploying.
+- **Studio query endpoints allow 3,000 requests per day per version URL**, and `GRAPH_API_KEY` is
+  ignored there — it only authenticates the decentralized gateway. Each mirror sync is two queries
+  (markets page, strategies page), so `MARKET_SYNC_INTERVAL_MS=15000` spent ~11,500 a day and the
+  endpoint answered `429` with `graph_unavailable` on every page until the window reset. Production
+  runs `MARKET_SYNC_INTERVAL_MS=120000` with `MARKET_SYNC_MAX_STALENESS_MS=360000` (~1,440 sync
+  queries a day; quotes are one query each). A failing sync makes this worse, not better: once the
+  mirror is stale every `/api/markets` read goes to The Graph directly. The way out of the cap is to
+  publish the subgraph to the network from Studio and point `GRAPH_QUERY_URL` at
+  `https://gateway.thegraph.com/api/subgraphs/id/<id>`, which is what the Bearer key is for.
 - Curves published to the previous router stay on the previous router. They are not migrated, and
   the Subgraph indexes only orders admitted to the new one — expect the market pages to show no
   resting liquidity until makers republish.

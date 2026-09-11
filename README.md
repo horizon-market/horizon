@@ -153,7 +153,7 @@ Ethereum Sepolia (chain `11155111`), recorded in [deployments/sepolia.json](depl
 Audit trail: HCS topic [`0.0.10473191`](https://hashscan.io/testnet/topic/0.0.10473191) on Hedera
 testnet, restricted to the audit signer's submit key.
 
-Indexer: `https://api.studio.thegraph.com/query/1758973/horizon/0.3.1`.
+Indexer: `https://api.studio.thegraph.com/query/1758973/horizon/0.3.2`.
 Transactions, block numbers and live re-checks are listed in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ## Status
