@@ -4,3 +4,4 @@ src/abi/*.rs
 src/pb/*.rs
 !src/pb/mod.rs
 .substreams.env
+src/pb/.last_generated_hash
