@@ -94,6 +94,12 @@ export function present(request: PublicRequest, quote?: (quantity: number) => un
       transactionRef: request.payment.transactionRef, payer: request.payment.payer, settledAt: request.payment.settledAt,
       failureCode: request.payment.failureCode, attempts: request.payment.attempts,
     },
+    // Creator notices, newest first: "your market was created", with where to find it.
+    notifications: (request.notifications ?? []).map(notification => ({
+      id: notification.id, kind: notification.kind, title: notification.title, body: notification.body, href: notification.href,
+      marketAddress: notification.marketAddress, position: notification.position, sources: notification.sources,
+      readAt: notification.readAt, createdAt: notification.createdAt, blockNumber: notification.blockNumber,
+    })),
     // Trading is free; this charge buys the creation service only.
     fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
   };
@@ -240,6 +246,13 @@ export function creationRoutes(service?: CreationService) {
    */
   router.get('/requests/:id/audit', steps, async (req, res) => {
     try { res.json(serialize({ audit: await service.auditTrail(req.params.id!, bearer(req), req.query.verify === '1') })); }
+    catch (error) { fail(res, error); }
+  });
+
+  router.post('/requests/:id/notifications/:notificationId/read', steps, async (req, res) => {
+    const notificationId = z.string().uuid().safeParse(req.params.notificationId);
+    if (!notificationId.success) { res.status(400).json({ error: 'invalid_notification' }); return; }
+    try { res.json(serialize({ request: view(await service.markNotificationRead(req.params.id!, bearer(req), notificationId.data)) })); }
     catch (error) { fail(res, error); }
   });
 
