@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { Config } from './config.js';
 import { MarketService } from './trading/markets.js';
 import { MarketProjectionStore, syncMarkets } from './trading/projection.js';
+import { LiveStore } from './trading/overlay.js';
 import { createDraftProvider } from './creation/ai.js';
 import { createVerifier } from './world/verifier.js';
 import { createFacilitator } from './payments/x402.js';
@@ -23,7 +24,10 @@ export type QueueBindings = {
 export function buildServices(config: Config, db: PrismaClient, queue: QueueBindings = {}) {
   // The mirror is only consulted when the sync is enabled; otherwise every read goes to The Graph.
   const projection = config.marketSync.enabled ? new MarketProjectionStore(db, config.marketSync.maxStalenessMs) : undefined;
-  const markets = config.trading ? new MarketService(config.trading, projection) : undefined;
+  // The live layer is read whether or not a consumer is running: with none, there are no changes
+  // newer than the snapshot and every read is exactly what it was before.
+  const live = new LiveStore(db);
+  const markets = config.trading ? new MarketService(config.trading, projection, live) : undefined;
   const provider = createDraftProvider(config.ai);
   const verifier = createVerifier(config.world);
   const facilitator = createFacilitator(config.payments);
@@ -56,7 +60,7 @@ export function buildServices(config: Config, db: PrismaClient, queue: QueueBind
   const syncProjection = markets && config.marketSync.enabled
     ? () => syncMarkets(db, markets.graph, { pageSize: config.marketSync.pageSize })
     : undefined;
-  return { markets, creation, admin, events, audit, provider, verifier, facilitator, deployer, submitter, projection, syncProjection };
+  return { markets, creation, admin, events, audit, provider, verifier, facilitator, deployer, submitter, projection, live, syncProjection };
 }
 
 export function publicConfig(config: Config, services: ReturnType<typeof buildServices>) {
@@ -76,6 +80,12 @@ export function publicConfig(config: Config, services: ReturnType<typeof buildSe
       note: 'A one-off x402 charge for the market creation service. It is unrelated to trading, which has no fee.',
     },
     ai: { provider: services.provider.name, mode: services.provider.mode },
+    // Live chain data. `reorg_aware` states the finality stance: a change is shown as soon as its
+    // block is seen and withdrawn if the chain reverts it; nothing is presented as final earlier
+    // than the stream's own final-block height.
+    live: { available: config.stream.enabled, finality: 'reorg_aware',
+      note: config.stream.enabled ? 'Markets, liquidity and trades update from the chain as blocks arrive; a reorg withdraws what it reverted.'
+        : 'Live updates are not enabled; pages refresh from the periodic index.' },
     world: { available: services.verifier.available, widgetAvailable: services.verifier.available && Boolean(config.world.signingKey),
       access: config.world.access, reason: services.verifier.reason, action: config.world.action, appId: config.world.appId,
       rpId: config.world.rpId, environment: config.world.environment },

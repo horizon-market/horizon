@@ -10,7 +10,7 @@ export type MarketSource = {
 };
 export type SyncOptions = { pageSize?: number; now?: () => Date };
 export type SyncReport = { status: 'OK' | 'EMPTY_SNAPSHOT_IGNORED' | 'FAILED'; indexedBlock: number; indexedHash: Hex | '';
-  markets: number; curves: number; removedMarkets: number; removedCurves: number; durationMs: number; failureCode?: string };
+  markets: number; curves: number; removedMarkets: number; removedCurves: number; retiredChanges: number; durationMs: number; failureCode?: string };
 export const MARKET_CHECKPOINT = 'markets';
 const ZERO_ID = '0x';
 
@@ -136,7 +136,7 @@ export async function syncMarkets(db: PrismaClient, source: MarketSource, option
     // subgraph. Keep what we have, flag it, and let the next sweep decide.
     if (markets.items.length === 0 && existing > 0) {
       const report: SyncReport = { status: 'EMPTY_SNAPSHOT_IGNORED', indexedBlock, indexedHash: markets.hash,
-        markets: 0, curves: 0, removedMarkets: 0, removedCurves: 0, durationMs: Date.now() - startedAt,
+        markets: 0, curves: 0, removedMarkets: 0, removedCurves: 0, retiredChanges: 0, durationMs: Date.now() - startedAt,
         failureCode: 'empty_snapshot' };
       await writeCheckpoint(db, report, syncedAt, false);
       return report;
@@ -157,17 +157,20 @@ export async function syncMarkets(db: PrismaClient, source: MarketSource, option
       }
       const removedCurves = await tx.curveProjection.deleteMany({ where: { id: { notIn: curveRows.map(row => row.id) } } });
       const removedMarkets = await tx.marketProjection.deleteMany({ where: { address: { notIn: marketRows.map(row => row.address) } } });
-      return { markets: removedMarkets.count, curves: removedCurves.count };
+      // The live layer is never written here, only released: a change at or below this block is
+      // now carried by the snapshot itself, so readers stop applying it. Nothing above it moves.
+      const retired = await tx.liveChange.updateMany({ where: { blockNumber: { lte: indexedBlock }, retiredAt: null }, data: { retiredAt: syncedAt } });
+      return { markets: removedMarkets.count, curves: removedCurves.count, retired: retired.count };
     }, { timeout: 30_000 });
 
     const report: SyncReport = { status: 'OK', indexedBlock, indexedHash: markets.hash, markets: marketRows.length,
-      curves: curveRows.length, removedMarkets: removed.markets, removedCurves: removed.curves, durationMs: Date.now() - startedAt };
+      curves: curveRows.length, removedMarkets: removed.markets, removedCurves: removed.curves, retiredChanges: removed.retired, durationMs: Date.now() - startedAt };
     await writeCheckpoint(db, report, syncedAt, true);
     return report;
   } catch (error) {
     const failureCode = error instanceof GraphError ? error.message : 'sync_failed';
     const report: SyncReport = { status: 'FAILED', indexedBlock: 0, indexedHash: '', markets: 0, curves: 0,
-      removedMarkets: 0, removedCurves: 0, durationMs: Date.now() - startedAt, failureCode };
+      removedMarkets: 0, removedCurves: 0, retiredChanges: 0, durationMs: Date.now() - startedAt, failureCode };
     // A failed sweep must not refresh syncedAt: staleness is what moves reads back to The Graph.
     await writeCheckpoint(db, report, syncedAt, false);
     throw error;

@@ -1,7 +1,8 @@
 import { createPublicClient, http, erc20Abi, encodeAbiParameters, parseAbiParameters, encodeFunctionData, keccak256, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
-import { GraphProvider, type IndexedMarket, type IndexedSnapshot } from './graph.js';
+import { GraphProvider, type IndexedMarket, type IndexedSnapshot, type MakerCurve, type OperatorRoute } from './graph.js';
 import type { MarketProjectionStore } from './projection.js';
+import { applyMakerOverlay, applyOverlay, type LiveStore, type LiveTrade, type MarketRef, type OverlayChange } from './overlay.js';
 import type { Curve } from './math.js';
 import { budgetOf, checkCapacity, obligationOf, type Budget, type OpenOrder } from './budget.js';
 import { buildBook, describeCurves, summarize, type CurveDescription, type MarketLiquidity } from './liquidity.js';
@@ -41,9 +42,24 @@ export class MarketService {
   readonly graph: GraphProvider;
   readonly client;
   private ledger?: Promise<Address>;
-  constructor(readonly config: TradingConfig, private projection?: MarketProjectionStore) {
+  constructor(readonly config: TradingConfig, private projection?: MarketProjectionStore, private live?: LiveStore) {
     this.graph = new GraphProvider(config.graph, config.graphKey);
     this.client = createPublicClient({ chain: sepolia, transport: http(config.rpc, { timeout: 15_000, retryCount: 1 }) });
+  }
+
+  /**
+   * The live layer over whichever snapshot answered: changes the stream recorded after the
+   * snapshot's block, and nothing older. A failing live read degrades to the snapshot alone; it
+   * never fails the request, because the snapshot is correct on its own, only later.
+   */
+  private async changesAfter(block: number, scope: { market?: string; maker?: string } = {}): Promise<OverlayChange[]> {
+    if (!this.live) return [];
+    try { return await this.live.changes(block, scope); }
+    catch { console.error('Live layer unavailable; serving the snapshot alone'); return []; }
+  }
+  private async withLive(snapshot: IndexedSnapshot & { source: Source }, scope: { market?: string } = {}) {
+    const overlaid = applyOverlay(snapshot, await this.changesAfter(snapshot.block, scope), scope);
+    return { ...overlaid, source: snapshot.source };
   }
 
   /**
@@ -82,14 +98,14 @@ export class MarketService {
   }
 
   async list() {
-    const snapshot = await this.read(() => this.projection!.indexedMarkets(), () => this.graph.indexedMarkets());
-    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, source: snapshot.source,
+    const snapshot = await this.withLive(await this.read(() => this.projection!.indexedMarkets(), () => this.graph.indexedMarkets()));
+    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, liveBlock: snapshot.liveBlock, source: snapshot.source,
       fees: { maker: 0, taker: 0, routing: 0, protocol: 0 }, markets: this.decorate(snapshot.markets) };
   }
 
   /** Market detail refreshes open status, collateral and result through RPC before display. */
   async detail(market: Address) {
-    const snapshot = await this.read(() => this.projection!.indexedMarket(market), () => this.graph.indexedMarket(market));
+    const snapshot = await this.withLive(await this.read(() => this.projection!.indexedMarket(market), () => this.graph.indexedMarket(market)), { market });
     const indexed = snapshot.markets[0];
     if (!indexed) throw new MarketError('unknown_market');
     const [registered, isOpen, result, collateral] = await Promise.all([
@@ -100,14 +116,14 @@ export class MarketService {
     ]);
     if (!registered) throw new MarketError('unknown_market');
     const [summary] = this.decorate([{ ...indexed, result, collateral }]);
-    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, source: snapshot.source, fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
+    return { indexedBlock: snapshot.block, indexedHash: snapshot.hash, liveBlock: snapshot.liveBlock, source: snapshot.source, fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
       book: buildBook(indexed.curves),
       market: { ...summary!, status: result !== 0 ? 'RESOLVED' : isOpen ? 'OPEN' : 'CLOSED', chainConfirmed: true } };
   }
 
   /** Holdings come from live token balances, not indexed transfers. */
   async positions(account: Address) {
-    const snapshot = await this.read(() => this.projection!.indexedMarkets(), () => this.graph.indexedMarkets());
+    const snapshot = await this.withLive(await this.read(() => this.projection!.indexedMarkets(), () => this.graph.indexedMarkets()));
     const markets = snapshot.markets;
     if (markets.length === 0) return { indexedBlock: snapshot.block, source: snapshot.source, positions: [] };
     const balances = await this.client.multicall({
@@ -138,9 +154,10 @@ export class MarketService {
    * order still depends on the wallet balance its Aqua allocation draws on, which is shared.
    */
   async curvesFor(maker: Address) {
-    const snapshot = await this.read(() => this.projection!.curvesByMaker(maker), () => this.graph.curvesByMaker(maker));
+    const base = await this.read(() => this.projection!.curvesByMaker(maker), () => this.graph.curvesByMaker(maker));
+    const snapshot = await this.makerWithLive(base, maker);
     const now = Math.floor(Date.now() / 1000);
-    return { indexedBlock: snapshot.block, source: snapshot.source, curves: snapshot.curves.map(curve => {
+    return { indexedBlock: snapshot.block, liveBlock: snapshot.liveBlock, source: snapshot.source, curves: snapshot.curves.map(curve => {
       const isYes = (curve.flags & 1) !== 0, isBuy = (curve.flags & 2) !== 0;
       const remaining = curve.maxShares > curve.filled ? curve.maxShares - curve.filled : 0n;
       return {
@@ -158,6 +175,55 @@ export class MarketService {
         executable: curve.active && curve.admitted && remaining > 0n,
       };
     }) };
+  }
+
+  /**
+   * A maker's list with newer changes applied. A curve shipped since the snapshot names a market
+   * the list may not describe yet; those facts are read once per such market, from the snapshot
+   * store, and the curve is listed only when they were found.
+   */
+  private async makerWithLive(base: { block: number; hash: Hex; curves: MakerCurve[] } & { source: Source }, maker: Address) {
+    const changes = await this.changesAfter(base.block, { maker });
+    const known = new Set(base.curves.map(curve => curve.market.toLowerCase()));
+    const refs = new Map<string, MarketRef>();
+    const unseen = [...new Set(changes.map(change => change.market).filter(market => !known.has(market)))].slice(0, 10);
+    for (const market of unseen) {
+      try {
+        const found = (await this.withLive(await this.read(() => this.projection!.indexedMarket(market as Address), () => this.graph.indexedMarket(market as Address)), { market })).markets[0];
+        if (found) refs.set(market, { question: found.question, closeAt: found.closeAt, result: found.result, yesToken: found.yesToken, noToken: found.noToken });
+      } catch { /* Left out until a later read can describe its market. */ }
+    }
+    return { ...applyMakerOverlay(base, changes, maker, refs), source: base.source };
+  }
+
+  /**
+   * Taker routes against one market, newest first, from both sources. A route is one immutable
+   * fact keyed by its transaction and log, so the two lists are simply merged and deduplicated —
+   * unlike a market or curve change, a trade needs no block comparison to be applied safely. The
+   * fills inside a route are neither trades nor volume, so neither source counts them.
+   */
+  async trades(market: Address, first = 50) {
+    let indexedBlock: number | null = null;
+    let indexed: OperatorRoute[] = [];
+    try {
+      const activity = await this.graph.activity(market, first);
+      indexedBlock = activity.block;
+      indexed = activity.routes;
+    } catch { console.error('Graph trade history unavailable; serving live trades alone'); }
+    let live: LiveTrade[] = [];
+    if (this.live) {
+      try { live = await this.live.trades(market, 0, first); }
+      catch { console.error('Live trade history unavailable'); }
+    }
+    const rows = new Map<string, { id: string; market: Address; taker: Address; recipient: Address; isYes: boolean; isBuy: boolean;
+      shares: bigint; usdc: bigint; fills: number; transaction: Hex; block: number; final: boolean; source: 'graph' | 'stream' }>();
+    for (const route of indexed) rows.set(route.id.toLowerCase(), { id: route.id.toLowerCase(), market: route.market, taker: route.taker, recipient: route.recipient,
+      isYes: route.isYes, isBuy: route.isBuy, shares: route.shares, usdc: route.usdc, fills: route.fills, transaction: route.transaction, block: route.block, final: true, source: 'graph' });
+    // Both sources present the Subgraph's route id, so a trade the stream saw first and the
+    // indexer confirmed later is one row.
+    for (const trade of live) if (!rows.has(trade.id.toLowerCase())) rows.set(trade.id.toLowerCase(), trade);
+    const trades = [...rows.values()].sort((a, b) => b.block - a.block || a.id.localeCompare(b.id)).slice(0, first);
+    return { indexedBlock, liveBlock: live.length ? Math.max(...live.map(trade => trade.block)) : null, trades };
   }
 
   /**
