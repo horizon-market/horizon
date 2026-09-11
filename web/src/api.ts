@@ -28,6 +28,8 @@ export type AppConfig = {
     delivery: string; deliveryNote: string; reason: string | null; note: string;
   };
   ai: { provider: string; mode: 'live' | 'development' };
+  /** Whether a stream consumer is expected to be running, and the finality stance of what it shows. */
+  live: { available: boolean; finality: 'reorg_aware'; note: string };
   world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'sandbox' | 'staging' | 'production' };
   resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string;
     groupConsistency: 'backend_only'; groupConsistencyNote: string };
@@ -82,7 +84,7 @@ export type MarketEventContext = {
   siblings: { position: number; outcomeLabel: string; marketAddress: string | null }[];
 };
 export type MarketList = {
-  indexedBlock: number; indexedHash: string; fees: Fees; markets: Market[];
+  indexedBlock: number; indexedHash: string; liveBlock: number | null; fees: Fees; markets: Market[];
   /** Grouped markets travel with their event; `standalone` names the ones that belong to none. */
   events: HorizonEvent[]; standalone: string[];
 };
@@ -221,8 +223,19 @@ export type MarketAudit = {
   audit: AuditTrail;
 };
 
+/** A creator-facing notice, kept until dismissed. `sources` says who vouched: the receipt, the chain stream, or both. */
+export type CreationNotification = {
+  id: string; kind: string; title: string; body: string; href: string; marketAddress: string; position: number | null;
+  sources: string[]; readAt: string | null; createdAt: string; blockNumber: number | null;
+};
+/** One taker route against a market. Fills inside it are not separate trades. */
+export type Trade = {
+  id: string; market: string; taker: string; recipient: string; isYes: boolean; isBuy: boolean;
+  shares: string; usdc: string; fills: number; transaction: string; block: number; final: boolean; source: 'graph' | 'stream';
+};
 export type CreationRequest = {
   id: string; status: string; question: string; requesterKind: string; requester: string;
+  notifications?: CreationNotification[];
   draft: MarketDraft | Record<string, unknown> | null;
   draftHash: string | null; draftProvider: string | null; draftMode: string | null;
   kind: 'SINGLE' | 'GROUP';
@@ -305,7 +318,8 @@ const post = <T>(path: string, body: unknown, headers: Record<string, string> = 
 export const api = {
   config: () => request<AppConfig>('/api/config'),
   markets: () => request<MarketList>('/api/markets'),
-  market: (id: string) => request<{ indexedBlock: number; market: Market; book: MarketBook; event: MarketEventContext | null }>(`/api/markets/${id}`),
+  market: (id: string) => request<{ indexedBlock: number; liveBlock: number | null; market: Market; book: MarketBook; event: MarketEventContext | null }>(`/api/markets/${id}`),
+  trades: (id: string) => request<{ indexedBlock: number | null; liveBlock: number | null; trades: Trade[] }>(`/api/markets/${id}/trades`),
   events: () => request<EventList>('/api/events'),
   event: (slug: string) => request<EventDetail>(`/api/events/${encodeURIComponent(slug)}`),
   eventAudit: (slug: string, verify = false) =>
@@ -353,6 +367,8 @@ export const api = {
     `/api/creation/requests/${id}/audit${verify ? '?verify=1' : ''}`, { headers: { authorization: `Bearer ${token}` } }),
   myCreations: (requester: string) => request<{ requests: CreationSummary[] }>(`/api/creation/requests?requester=${encodeURIComponent(requester)}`),
   abandon: (id: string, token: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/abandonment`, {}, { authorization: `Bearer ${token}` }),
+  markNotificationRead: (id: string, token: string, notificationId: string) =>
+    post<{ request: CreationRequest }>(`/api/creation/requests/${id}/notifications/${notificationId}/read`, {}, { authorization: `Bearer ${token}` }),
   approve: (id: string, token: string, draftHash: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/approval`, { draftHash }, { authorization: `Bearer ${token}` }),
   verify: (id: string, token: string, proof: unknown) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/verification`, { proof }, { authorization: `Bearer ${token}` }),
   worldContext: (id: string, token: string) => post<{ rp_id: string; nonce: string; created_at: number; expires_at: number; signature: string }>(

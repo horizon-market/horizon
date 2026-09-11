@@ -27,9 +27,20 @@ const write = (archive: Archive) => {
   catch { /* storage may be unavailable */ }
 };
 
-export const rememberCreation = ({ id, token }: Saved) => { const archive = read(); archive[id] = token; write(archive); };
-export const forgetCreation = (id: string) => { const archive = read(); delete archive[id]; write(archive); };
+const CHANGED = 'horizon:creations';
+const announce = () => { try { window.dispatchEvent(new Event(CHANGED)); } catch { /* not in a browser */ } };
+
+export const rememberCreation = ({ id, token }: Saved) => { const archive = read(); archive[id] = token; write(archive); announce(); };
+export const forgetCreation = (id: string) => { const archive = read(); delete archive[id]; write(archive); announce(); };
 export const creationToken = (id: string): string | undefined => read()[id];
+/** Every request this browser can still speak for, newest first. */
+export const allCreations = (): Saved[] => Object.entries(read()).reverse().map(([id, token]) => ({ id, token }));
+/** Fires whenever the archive changes, so the live subscription can follow it. */
+export const onCreationsChanged = (handler: () => void) => {
+  window.addEventListener(CHANGED, handler);
+  window.addEventListener('storage', handler);
+  return () => { window.removeEventListener(CHANGED, handler); window.removeEventListener('storage', handler); };
+};
 
 /** Points the create page at an existing request, for a resume link raised somewhere else. */
 export const activateCreation = (saved: Saved) => {

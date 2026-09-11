@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type MakerCurve, type Market, type MarketBudgets, type MarketEventContext, type Position } from '../api';
-import { useAsync } from '../hooks';
+import { api, type MakerCurve, type Market, type MarketBudgets, type MarketEventContext, type Position, type Trade } from '../api';
+import { useAsync, useDebouncedReload, useLive } from '../hooks';
 import { useWallet } from '../App';
 import { Address, Badge, Card, ErrorBox, Fill, HelpLink, Loading, Notice, TransactionState } from '../components/Ui';
 import { AuditRecordLine, AuditTrailCard } from '../components/AuditTrail';
@@ -43,7 +43,20 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
   // The request that deployed this market and what was published about it. Read on its own so
   // the market page never depends on it; a market that predates the trail simply shows none.
   const audit = useAsync(() => api.marketAudit(market), [market]);
+  const trades = useAsync(() => api.trades(market), [market]);
   const [isYes, setIsYes] = useState(opening.isYes);
+  // Bumped when this market's liquidity moved: the ticket re-quotes, without anything else reloading.
+  const [liquidityTick, setLiquidityTick] = useState(0);
+  const refetchDetail = useDebouncedReload(() => { detail.reload(); mine.reload(); });
+  const refetchTrades = useDebouncedReload(trades.reload);
+  useLive(event => {
+    const here = typeof event.payload.market === 'string' && event.payload.market.toLowerCase() === market.toLowerCase();
+    if (event.type === 'snapshot.required') { refetchDetail(); refetchTrades(); return; }
+    if (!here) return;
+    if (event.type === 'market.updated') refetchDetail();
+    if (event.type === 'liquidity.changed') { refetchDetail(); setLiquidityTick(tick => tick + 1); }
+    if (event.type === 'trade.executed' || event.type === 'trade.reverted') refetchTrades();
+  });
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
   const data = detail.data!.market;
@@ -115,7 +128,7 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
           {data.status === 'OPEN'
             ? <OrderTicket market={market} book={data.liquidity} isYes={isYes} onOutcome={setIsYes}
                 account={account} position={mine.data?.position} budgets={mine.data?.budgets}
-                onDone={refresh} opening={opening} />
+                onDone={refresh} opening={opening} liquidityTick={liquidityTick} />
             : <Card title="Trading closed">
                 <p className="muted small">This market no longer accepts fills. Resolved markets can be redeemed from <a href="/holdings">Portfolio</a>.</p>
                 {/* The ticket is what normally chooses the outcome, so a closed market lends its selector. */}
@@ -126,12 +139,44 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
           )}
         </div>
       </div>
+      <RecentTrades trades={trades.data?.trades ?? []} loading={trades.loading} indexedBlock={trades.data?.indexedBlock ?? null} />
       {audit.data && (
         <AuditTrailCard id="audit" audit={audit.data.audit} highlightAddress={market}
           verify={() => api.marketAudit(market, true).then(result => result.audit)}
           outcomeLabel={position => group?.siblings.find(sibling => sibling.position === position)?.outcomeLabel} />
       )}
     </div>
+  );
+}
+
+/**
+ * Taker routes against this market, newest first. A route the stream saw but the indexer has not
+ * confirmed yet is marked; the fills inside a route are not listed as trades of their own.
+ */
+function RecentTrades({ trades, loading, indexedBlock }: { trades: Trade[]; loading: boolean; indexedBlock: number | null }) {
+  return (
+    <Card title="Recent trades" actions={<span className="small muted">{indexedBlock ? `indexed through block ${indexedBlock}` : 'indexer unavailable'}</span>}>
+      {loading && trades.length === 0 && <Loading rows={2} label="Loading trades" />}
+      {!loading && trades.length === 0 && <p className="small muted" style={{ margin: 0 }}>No trades yet.</p>}
+      {trades.length > 0 && (
+        <table>
+          <thead><tr><th>Block</th><th>Side</th><th>Shares</th><th>USDC</th><th>Fills</th><th>Taker</th><th /></tr></thead>
+          <tbody>
+            {trades.map(trade => (
+              <tr key={trade.id}>
+                <td>{trade.block}</td>
+                <td><Badge kind={trade.isYes ? 'open' : 'no'}>{trade.isBuy ? 'Buy' : 'Sell'} {trade.isYes ? 'YES' : 'NO'}</Badge></td>
+                <td>{shares(trade.shares)}</td>
+                <td>{usdc(trade.usdc)}</td>
+                <td>{trade.fills}</td>
+                <td><Address value={trade.taker} /></td>
+                <td className="small muted">{trade.source === 'stream' && !trade.final ? 'confirming' : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }
 
@@ -200,12 +245,14 @@ const TABS: { key: OrderType; label: string }[] = [
  * Aqua order — a limit order is simply the one whose start and end prices are equal — which is why
  * they belong on one control rather than on separate pages.
  */
-function OrderTicket({ market, book, isYes, onOutcome, account, position, budgets, onDone, opening }: {
+function OrderTicket({ market, book, isYes, onOutcome, account, position, budgets, onDone, opening, liquidityTick }: {
   market: string; book: Market['liquidity']; isYes: boolean; onOutcome: (isYes: boolean) => void;
   account?: string; position?: Position;
   /** Undefined while loading, null when the market's budget could not be read at all. */
   budgets?: MarketBudgets | null; onDone: () => void;
   opening: { type: OrderType; isBuy: boolean };
+  /** Changes when this market's liquidity moved; a held quote is re-priced rather than trusted. */
+  liquidityTick: number;
 }) {
   const wallet = useWallet();
   const [type, setType] = useState<OrderType>(opening.type);
@@ -240,7 +287,7 @@ function OrderTicket({ market, book, isYes, onOutcome, account, position, budget
             : 'You hold no outcome tokens in this market, so there is nothing to sell yet.'}
         </p>
       )}
-      {type === 'market' && <MarketOrder market={market} side={side} account={account} onDone={onDone} onSwitchToLimit={() => setType('limit')} />}
+      {type === 'market' && <MarketOrder market={market} side={side} account={account} onDone={onDone} onSwitchToLimit={() => setType('limit')} refreshKey={liquidityTick} />}
       {type === 'limit' && <LimitOrder market={market} side={side} account={account} book={outcome} budgets={budgets} onDone={onDone} />}
       {type === 'curve' && <CurveOrder market={market} side={side} account={account} book={outcome} budgets={budgets} onDone={onDone} />}
       {!account && (

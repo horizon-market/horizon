@@ -5,7 +5,7 @@ import {
   type CreationRequest, type ExistingImport, type ImportPreviewResult, type ImportWarning,
   type MarketDraft, type PaymentRequirements, type PaymentResource, type RequestChild,
 } from '../api';
-import { useLocalState } from '../hooks';
+import { useLive, useLocalState } from '../hooks';
 import { CREATION_LABEL, forgetCreation, isDiscardable, rememberCreation, type Saved } from '../creations';
 import { useConfig, useWallet } from '../App';
 import { Address, Badge, Card, HelpLink, Notice, TxLink, describe } from '../components/Ui';
@@ -50,6 +50,14 @@ export function CreateMarket() {
       () => release(),
     );
   }
+
+  // The creation job runs in another process. When it, or the chain stream, reports this request
+  // moved — a child deployed, the market announced — the request is re-read here, so the page
+  // follows each market as it is created instead of waiting for the whole group or for a click.
+  useLive(event => {
+    if (event.type !== 'creation.updated' || !saved || event.payload.requestId !== saved.id) return;
+    api.getRequest(saved.id, saved.token).then(result => setRequest(result.request), () => undefined);
+  });
 
   const act: Act = async run => {
     setError(undefined); setBusy(true);
@@ -970,9 +978,10 @@ function Outcome({ request, busy, onRefresh, onReset }: { request: CreationReque
       )}
       {request.status === 'CREATED' && (
         <Notice kind="ok">
+          {/* "Created", not "ready to trade": trading needs liquidity someone has yet to post. */}
           {group
-            ? <>All {selected.length} markets are live. They appear under <a href={`/events/${request.event?.slug}`}>{request.event?.title}</a> once The Graph has indexed them.</>
-            : <>The market is live. It appears in <a href="/">Markets</a> once The Graph has indexed it.</>}
+            ? <>All {selected.length} markets were created. They are listed under <a href={`/events/${request.event?.slug}`}>{request.event?.title}</a>.</>
+            : <>Your market was created{request.marketAddress ? <>: <a href={`/markets/${request.marketAddress}`}>open it</a></> : ''}. It needs a resting order before anyone can trade it.</>}
           <button className="link" style={{ marginLeft: '.5rem' }} onClick={onReset}>Start another request</button>
         </Notice>
       )}

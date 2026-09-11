@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { live, type LiveEvent } from './live';
 
 /**
  * The API serves index.html for browser routes, so the app can use ordinary clean URLs.
@@ -59,4 +60,34 @@ export function useLocalState<T>(key: string, initial: T): [T, (value: T) => voi
     try { window.localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage may be unavailable */ }
   }, [key]);
   return [value, update];
+}
+
+/**
+ * Live messages, for the page that cares. The handler always sees the latest render's closure,
+ * and the subscription is made once, so a page neither misses a message nor re-subscribes on
+ * every state change. Pages refresh the one piece a message concerns; nothing reloads wholesale.
+ */
+export function useLive(handler: (event: LiveEvent) => void) {
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => live.subscribe(event => latest.current(event)), []);
+}
+
+/** Whether the tab currently holds a live connection, for a small indicator. */
+export function useLiveStatus(): boolean {
+  const [connected, setConnected] = useState(live.connected);
+  useEffect(() => live.onStatus(setConnected), []);
+  return connected;
+}
+
+/** A reload that collapses a burst of messages into one request. */
+export function useDebouncedReload(reload: () => void, ms = 400) {
+  const timer = useRef<number | undefined>(undefined);
+  const latest = useRef(reload);
+  latest.current = reload;
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return useCallback(() => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => latest.current(), ms);
+  }, [ms]);
 }
