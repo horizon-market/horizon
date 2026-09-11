@@ -28,6 +28,15 @@ export function handleShip(event: Shipped): void {
   s.startPrice = curve.startPrice; s.endPrice = curve.endPrice; s.maxShares = curve.maxShares; s.salt = curve.salt;
   s.filled = BigInt.zero(); s.active = true; s.admitted = false; s.publishedAt = event.block.timestamp; s.save();
 }
+/** Aqua is shared by many apps; only the stored maker can cancel a Horizon strategy. */
+export function handleDock(event: Docked): void {
+  let configured = Address.fromString(dataSource.context().getString('router'));
+  if (!event.params.app.equals(configured)) return;
+  let s = Strategy.load(event.params.strategyHash);
+  if (s == null) return;
+  if (!s.maker.equals(event.params.maker)) return;
+  s.active = false; s.save();
+}
 /** Aqua publication alone is not executable liquidity; the router's admission is what makes it so. */
 export function handleAdmit(event: StrategyAdmitted): void {
   let s = Strategy.load(event.params.orderHash); if (s == null) return;
