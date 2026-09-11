@@ -214,6 +214,33 @@ which keeps state colour consistent with the rest of the app:
 | Filled | `resolved` | Order completely filled |
 | Closed | `closed` | Order cancelled, or its market closed |
 
+## Live notices
+
+The creator's notices (`web/src/components/Toasts.tsx`, fed by `LiveNotices.tsx`) are a stack
+fixed at the bottom-right corner, `--z-overlay`, 23rem wide and full-width under 700px. Built
+from existing tokens; the only new rules are `.toasts` and `.toast-*`.
+
+- **Words.** The headline is the thing — the question, or the event's title — in the display face
+  at `--text-md`, clamped to two lines. The eyebrow above it is what happened: `MARKET CREATED`,
+  `EVENT CREATED · 8 MARKETS`. It says *created* and never *tradable*, since whether a market can
+  trade is decided by executable liquidity, not by this notice. The meta line carries the block
+  and the transaction, so the claim is checkable from the card.
+- **Colour.** Green eyebrow and dot: success, which is what green means in a notice. Amber with a
+  muted `confirming`: only the chain stream has vouched for it so far; the worker's receipt has not
+  arrived, and a reorg could still withdraw it. Nothing here is an outcome, so nothing here is
+  red or green in the outcome sense.
+- **Stack.** Newest in front. Behind it, up to two more peek out by 12px at 5% steps of scale;
+  hover, focus, or a tap fans them out with a 10px gap and a "Dismiss all" row. Every card is
+  positioned by `transform` from measured heights, so the fan-out is one interruptible
+  `--duration-slow` transition on `--ease-out`.
+- **Motion.** A card enters from below the edge; it leaves the same way, faster (220ms), and the
+  cards behind close the gap. A notice that arrived while the tab was open rings its dot three
+  times; one found on load does not. Swiping a card down dismisses it — past 48px, or any flick
+  faster than 0.11px/ms — with friction when dragged the wrong way. Buttons scale to .96 on press.
+  Reduced motion collapses all of it, via the global rule.
+- **Persistence.** Nothing times out. Opening a notice or dismissing it marks it read on the
+  server; the portfolio still lists the market.
+
 ## Curve editor components
 
 The curve editor is one component reused by the trade ticket's **Curve** tab and by the `/curves`

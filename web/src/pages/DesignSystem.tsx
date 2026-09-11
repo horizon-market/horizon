@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CurveChart } from '../components/CurveChart';
+import { present } from '../components/LiveNotices';
+import { Toasts } from '../components/Toasts';
 import { OrderBook } from '../components/OrderBook';
 import { CurveLiquidity } from '../components/CurveLiquidity';
 import {
@@ -288,6 +290,13 @@ export function DesignSystem() {
           <Notice kind="brand">A product claim, not an outcome. Green is reserved for YES.</Notice>
           <ZeroFee />
         </div>
+        <h3 style={{ marginTop: 'var(--space-4)' }}>Live notices</h3>
+        <p className="small muted">
+          The creator's notices, stacked at the corner of the site. Newest in front; hover fans them out; swipe one down, or
+          open it, and it is read. The headline is the thing, the eyebrow is what happened to it — <em>created</em>, never
+          <em> tradable</em>. Amber means only the chain stream has vouched for it so far.
+        </p>
+        <ToastSpecimen />
         <h3 style={{ marginTop: 'var(--space-4)' }}>Transaction state</h3>
         <div className="stack">
           <TransactionState state={{ phase: 'signing' }} />
@@ -508,6 +517,31 @@ export function DesignSystem() {
           <Empty title="No markets are indexed yet"><p>Create the first one from the <a href="/create">Create market</a> page.</p></Empty>
         </Card>
       </section>
+    </div>
+  );
+}
+
+const SPECIMEN_NOTICES = [
+  { id: 'n1', requestId: 'r1', kind: 'market.created', title: 'Your market was created', href: '/markets/0x1', marketAddress: '0x1', position: null,
+    body: 'Will ETH close above $5,000 on 30 September 2026?', sources: ['stream', 'receipt'], readAt: null, createdAt: '2026-09-11T10:03:00Z',
+    blockNumber: 9102334, txHash: '0x465d78fa22ade4503a1693993f947379ecbb6d5601262de284144938a44b7860' },
+  { id: 'n2', requestId: 'r2', kind: 'event.created', title: 'Your event was created', href: '/events/us-open-2026', marketAddress: '', position: null,
+    body: 'US Open 2026 — men\u2019s singles champion · 8 markets', sources: ['stream'], readAt: null, createdAt: '2026-09-11T10:01:00Z', blockNumber: 9102301, txHash: null },
+  { id: 'n3', requestId: 'r3', kind: 'market.created', title: 'Your market was created', href: '/markets/0x3', marketAddress: '0x3', position: null,
+    body: 'Will the Fed cut rates at the November meeting?', sources: ['receipt'], readAt: null, createdAt: '2026-09-11T09:58:00Z', blockNumber: 9102250, txHash: null },
+];
+
+/** The stack, in the page flow, with a button to bring a dismissed notice back. */
+function ToastSpecimen() {
+  const [gone, setGone] = useState<string[]>([]);
+  const items = SPECIMEN_NOTICES.filter(notice => !gone.includes(notice.id)).map(notice => ({ ...present(notice), fresh: notice.id === 'n1' }));
+  return (
+    <div className="stack">
+      <div style={{ paddingTop: 'var(--space-4)' }}>
+        <Toasts inline items={items} onOpen={item => setGone(current => [...current, item.id])}
+          onDismiss={item => setGone(current => [...current, item.id])} onDismissAll={() => setGone(SPECIMEN_NOTICES.map(notice => notice.id))} />
+      </div>
+      {gone.length > 0 && <div><button onClick={() => setGone([])}>Bring them back</button></div>}
     </div>
   );
 }
