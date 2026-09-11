@@ -27,7 +27,18 @@ export type PublishReport = { status: 'published' | 'idle' | 'blocked' | 'not_co
 export class AuditService {
   constructor(private deps: AuditDependencies) {}
 
+  /**
+   * Whether this process can submit. Only the process holding the audit signer can, which in a
+   * split deployment is the worker alone.
+   */
   get publishing(): boolean { return this.deps.publisher.available; }
+
+  /**
+   * Whether a trail exists to read. This is deliberately not `publishing`: the API process shows
+   * the topic, the consensus timestamps and the mirror links without ever holding the signer, so
+   * an API that cannot publish must not report the trail as absent.
+   */
+  get configured(): boolean { return Boolean(this.deps.config.topicId); }
   private now(): Date { return this.deps.now?.() ?? new Date(); }
 
   /**
@@ -207,11 +218,11 @@ export class AuditService {
   present(events: AuditEvent[]) {
     const config = this.deps.config;
     return {
-      available: this.publishing,
+      available: this.configured,
       schema: AUDIT_SCHEMA,
       network: config.network,
-      topicId: this.publishing ? config.topicId : null,
-      topicUrl: this.publishing ? `${config.explorerBase.replace(/\/$/, '')}/topic/${config.topicId}` : null,
+      topicId: this.configured ? config.topicId : null,
+      topicUrl: this.configured ? `${config.explorerBase.replace(/\/$/, '')}/topic/${config.topicId}` : null,
       mirrorNodeUrl: config.mirrorNodeUrl,
       types: [...AUDIT_TYPES],
       delivery: 'at_least_once' as const,

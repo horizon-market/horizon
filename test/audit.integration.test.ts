@@ -455,3 +455,28 @@ test('with no topic configured the trail is still recorded, and nothing is repor
   assert.equal(view.topicId, null);
   assert.ok(view.events.every(event => event.consensusAt === null && event.transactionId === null));
 });
+
+test('an API process without the audit signer still serves the trail it cannot publish', { timeout: 30_000 }, async () => {
+  // The split deployment: the worker holds the signer, the API holds none. The API must show the
+  // topic, the consensus timestamps and the mirror links rather than reporting an absent trail.
+  const publisher = new ScriptedPublisher();
+  const worker = build({ publisher });
+  const { id } = await completeRequest(worker, 'Will an API process without the audit signer still serve the published trail?');
+  await worker.audit.publishRequest(id);
+
+  const reader = new AuditService({
+    db, config: { ...auditConfig, enabled: false, operatorKey: undefined, reason: 'Publication is not configured: set HEDERA_AUDIT_PRIVATE_KEY.' },
+    publisher: new UnconfiguredAuditPublisher(), mirror: new ScriptedMirror(publisher),
+  });
+  assert.equal(reader.publishing, false, 'it must not be able to submit');
+  assert.equal(reader.configured, true, 'but it knows the trail exists');
+  const view = reader.present(await rows(id));
+  assert.equal(view.available, true);
+  assert.equal(view.topicId, TOPIC);
+  assert.equal(view.topicUrl, `https://hashscan.io/testnet/topic/${TOPIC}`);
+  assert.ok(view.events.every(event => event.status === 'PUBLISHED' && event.consensusAt && event.mirrorUrl));
+  // And it can still verify against the mirror node, which needs no key at all.
+  assert.ok((await reader.verify(await rows(id))).every(result => result.matches));
+  // Asking it to publish is refused rather than attempted.
+  assert.equal((await reader.publishRequest(id)).status, 'not_configured');
+});

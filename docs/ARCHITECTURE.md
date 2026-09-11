@@ -273,10 +273,17 @@ topic accepts messages only from the configured audit signer.
 
 `HEDERA_AUDIT_TOPIC_ID`, `HEDERA_AUDIT_ACCOUNT_ID` and `HEDERA_AUDIT_PRIVATE_KEY` configure a
 server-side audit signer whose public key is the topic's **submit key**, so no other account can
-append to the trail. The key stays in the API/worker process; it is never logged, never returned
-by an API and never written into a statement. `npm run audit:topic` creates such a topic. Without
-these settings the outbox still records every statement — it simply publishes nothing, and says so
-rather than presenting an empty trail as a complete one.
+append to the trail. The key is never logged, never returned by an API and never written into a
+statement. `npm run audit:topic` creates such a topic. Without these settings the outbox still
+records every statement — it simply publishes nothing, and says so rather than presenting an empty
+trail as a complete one.
+
+**Only the process that publishes needs the signer.** Publication runs on the worker, so in a
+split deployment `HEDERA_AUDIT_PRIVATE_KEY` belongs there alone — the same rule
+`EVM_DEPLOYER_PRIVATE_KEY` already follows. The API needs the topic id, the network and the mirror
+URL to render the trail, and reads and verifies it with no key at all: `configured` (a topic
+exists) is deliberately separate from `publishing` (this process can submit), so an API that
+cannot publish never reports the trail as absent.
 
 ## World verification
 

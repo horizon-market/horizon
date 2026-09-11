@@ -88,11 +88,13 @@ export function publicConfig(config: Config, services: ReturnType<typeof buildSe
     // The public audit trail. What it attests is stated where the application can read it, so no
     // screen can present it as verification of the payment, the deployment or a market outcome.
     audit: {
-      available: services.audit.publishing,
+      // `configured`, not `publishing`: the API serves the trail and its links without holding the
+      // audit signer, which in a split deployment lives only in the worker.
+      available: services.audit.configured,
       schema: AUDIT_SCHEMA, types: [...AUDIT_TYPES],
       network: config.audit.network,
-      topicId: services.audit.publishing ? config.audit.topicId : null,
-      topicUrl: services.audit.publishing ? `${config.audit.explorerBase.replace(/\/$/, '')}/topic/${config.audit.topicId}` : null,
+      topicId: services.audit.configured ? config.audit.topicId : null,
+      topicUrl: services.audit.configured ? `${config.audit.explorerBase.replace(/\/$/, '')}/topic/${config.audit.topicId}` : null,
       mirrorNodeUrl: config.audit.mirrorNodeUrl,
       delivery: 'at_least_once', deliveryNote: AUDIT_DELIVERY_NOTE,
       reason: config.audit.reason, note: AUDIT_DISCLOSURE,
