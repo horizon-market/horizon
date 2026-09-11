@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { api, type EventChild, type HorizonEvent } from '../api';
+import { api, ApiError, type EventChild, type HorizonEvent } from '../api';
 import { navigate, useAsync } from '../hooks';
 import { useWallet } from '../App';
 import { Address, Badge, Card, Empty, ErrorBox, Loading, Notice, ZeroFee } from '../components/Ui';
+import { AuditBadge, AuditTrailCard } from '../components/AuditTrail';
 import { MarketOrder } from '../components/MarketOrder';
 import { dateTime, price, shares, timeLeft, usdc } from '../format';
 
@@ -20,6 +21,9 @@ const hideBrokenArt = (event: { currentTarget: HTMLImageElement }) => { event.cu
  */
 export function EventDetail({ slug }: { slug: string }) {
   const detail = useAsync(() => api.event(slug), [slug]);
+  // Read on its own: the trail is a claim about how the event was made, not part of the event,
+  // so a mirror or outbox that cannot be read leaves the event page exactly as it was.
+  const audit = useAsync(() => api.eventAudit(slug), [slug]);
   const account = useWallet().account;
   if (detail.loading) return <Loading rows={7} label="Loading event" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
@@ -40,7 +44,10 @@ export function EventDetail({ slug }: { slug: string }) {
             </Badge>
             {event.category && <span className="badge closed">{event.category}</span>}
           </div>
-          <SourceBadge event={event} />
+          <div className="row">
+            <AuditBadge audit={audit.data?.audit} />
+            <SourceBadge event={event} />
+          </div>
         </div>
         <div className="event-head">
           {/* The source's own artwork, imported with the definition. It is loaded without a
@@ -76,6 +83,21 @@ export function EventDetail({ slug }: { slug: string }) {
               <ChildRow key={child.position} child={child} account={account} onDone={detail.reload} />
             ))}
           </div>}
+
+      {audit.data && (
+        <AuditTrailCard id="audit" audit={audit.data.audit}
+          verify={() => api.eventAudit(slug, true).then(result => result.audit)}
+          outcomeLabel={position => event.children.find(child => child.position === position)?.outcomeLabel}>
+          {audit.data.requests.length > 1 && (
+            <p className="small muted">
+              This event was built by {audit.data.requests.length} creation requests; their statements are shown in the order they were made.
+            </p>
+          )}
+        </AuditTrailCard>
+      )}
+      {audit.error !== undefined && !(audit.error instanceof ApiError && audit.error.status === 404) && (
+        <p className="small muted">The public audit trail could not be loaded.</p>
+      )}
 
       {live.length > 0 && (
         <Card title="Local statistics">

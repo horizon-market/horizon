@@ -269,6 +269,18 @@ the check a third party can repeat against the same public URLs without trusting
 `npm run audit:verify` does the same from the command line, and `npm run doctor` re-checks that the
 topic accepts messages only from the configured audit signer.
 
+The same trail is public under the identifiers a reader actually holds, with no token:
+`GET /api/audit/events/:slug` returns every statement across the requests that built an event,
+oldest request first, and `GET /api/audit/markets/:address` returns the trail of the request that
+deployed one market — the whole request, since one payment covered every child — naming the
+statement that records this deployment. Both accept `?verify=1` under a tighter rate limit, since a
+verification is one mirror-node read per published statement. The envelopes add only what is
+already public: the event's slug and title, the child's position and outcome label, and the
+request's id, kind and creation time — the id is already inside every published message. Request
+status, requester, tokens and payment details are never included. The event and market pages read
+these to show the trail beside the markets it is about; a market that predates the trail simply
+shows none.
+
 ### Configuration
 
 `HEDERA_AUDIT_TOPIC_ID`, `HEDERA_AUDIT_ACCOUNT_ID` and `HEDERA_AUDIT_PRIVATE_KEY` configure a

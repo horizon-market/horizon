@@ -1,7 +1,7 @@
 import type { AuditEvent, Prisma, PrismaClient } from '@prisma/client';
 import type { AuditConfig } from '../config.js';
 import {
-  AUDIT_DELIVERY_NOTE, AUDIT_DISCLOSURE, AUDIT_SCHEMA, AUDIT_TYPES, auditMessageSchema,
+  AUDIT_DELIVERY_NOTE, AUDIT_DISCLOSURE, AUDIT_SCHEMA, AUDIT_TYPES, auditEventId, auditMessageSchema,
   encodeAuditMessage, type AuditRecord,
 } from './events.js';
 import {
@@ -218,6 +218,70 @@ export class AuditService {
 
   async trail(requestId: string): Promise<AuditEvent[]> {
     return this.deps.db.auditEvent.findMany({ where: { requestId }, orderBy: { sequence: 'asc' } });
+  }
+
+  /**
+   * Every statement about an event, across all of its creation requests, oldest request first.
+   *
+   * Keyed by the public slug rather than a request id, so a reader who only knows the event page
+   * can find the trail. An event can carry more than one request — an abandoned import retried, a
+   * partial group run again — and each one's statements are on the topic, so all are returned in
+   * the order they were made. Of the request itself only the id, kind and creation time travel:
+   * the id is already inside every published message and nothing else about it is public.
+   */
+  async trailForEvent(slug: string) {
+    const event = await this.deps.db.marketEvent.findUnique({
+      where: { slug },
+      select: {
+        id: true, slug: true, title: true,
+        requests: {
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, kind: true, createdAt: true, auditEvents: { orderBy: { sequence: 'asc' } } },
+        },
+      },
+    });
+    if (!event) return null;
+    return {
+      event: { id: event.id, slug: event.slug, title: event.title },
+      requests: event.requests.map(request => ({
+        id: request.id, kind: request.kind, createdAt: request.createdAt, statements: request.auditEvents.length,
+      })),
+      events: event.requests.flatMap(request => request.auditEvents),
+    };
+  }
+
+  /**
+   * The request that deployed one market: the address sits on the request for a single market and
+   * on a child for a group. Addresses are written as the deployer returned them, checksummed, while
+   * an event member holds the lower-cased form, so the match is case-insensitive. The whole request
+   * trail is returned — one payment covered every child — with the statement that records this
+   * deployment named, so a client can point at it without parsing payloads.
+   */
+  async trailForMarket(address: string) {
+    const match = { equals: address, mode: 'insensitive' as const };
+    const request = await this.deps.db.creationRequest.findFirst({
+      where: { OR: [{ marketAddress: match }, { children: { some: { marketAddress: match } } }] },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true, kind: true, createdAt: true, marketAddress: true,
+        event: { select: { slug: true, title: true } },
+        children: { where: { marketAddress: match }, select: { position: true, marketAddress: true, outcomeLabel: true } },
+        auditEvents: { orderBy: { sequence: 'asc' } },
+      },
+    });
+    if (!request) return null;
+    const child = request.children[0];
+    return {
+      market: {
+        address: (child?.marketAddress ?? request.marketAddress ?? address).toLowerCase(),
+        position: child?.position ?? null,
+        outcomeLabel: child?.outcomeLabel ?? null,
+        eventId: auditEventId(request.id, 'MARKET_CREATED', child?.position),
+      },
+      request: { id: request.id, kind: request.kind, createdAt: request.createdAt },
+      event: request.event,
+      events: request.auditEvents,
+    };
   }
 
   private links(event: AuditEvent) {

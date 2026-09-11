@@ -154,6 +154,17 @@ the topic — is the ordinary path.
 Recorded in [`deployments/audit-evidence.json`](../deployments/audit-evidence.json), and
 `npm run doctor` re-checks both the topic's submit key and the published statements.
 
+The trail is also readable without a token, by event slug or market address, and each event and
+market page shows it. For example, the Sunderland AFC vs. Arsenal FC import — five statements at
+sequence numbers 14–18:
+
+```sh
+curl -s https://horizon-production-8c50.up.railway.app/api/audit/events/sunderland-afc-vs-arsenal-fc \
+  | jq '.audit.events[] | {type, status, sequenceNumber, transactionUrl}'
+curl -s 'https://horizon-production-8c50.up.railway.app/api/audit/markets/0xa1a26d4b1effcae156c39ba6caa1ce11ea14dee3?verify=1' \
+  | jq '.market, .audit.verification'
+```
+
 ## Disclosed centralized roles
 
 This MVP is deliberately centralized in two places, and both are stated in the product UI.

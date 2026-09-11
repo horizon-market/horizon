@@ -3,6 +3,7 @@ import { api, type MakerCurve, type Market, type MarketBudgets, type MarketEvent
 import { useAsync } from '../hooks';
 import { useWallet } from '../App';
 import { Address, Badge, Card, ErrorBox, Fill, HelpLink, Loading, Notice, TransactionState } from '../components/Ui';
+import { AuditRecordLine, AuditTrailCard } from '../components/AuditTrail';
 import { isLive, useCancelCurve, usePublishCurve } from '../orders';
 import { dateTime, parseUnits, price, priceUsdc, shares, timeLeft, usdc, USDC_DECIMALS } from '../format';
 import { OrderBook } from '../components/OrderBook';
@@ -39,6 +40,9 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
     return { orders: published.curves.filter(curve => here(curve.market)),
       position: held.positions.find(p => here(p.market)), budgets };
   }, [account, market]);
+  // The request that deployed this market and what was published about it. Read on its own so
+  // the market page never depends on it; a market that predates the trail simply shows none.
+  const audit = useAsync(() => api.marketAudit(market), [market]);
   const [isYes, setIsYes] = useState(opening.isYes);
   if (detail.loading) return <Loading rows={6} label="Loading market" />;
   if (detail.error) return <ErrorBox error={detail.error} retry={detail.reload} />;
@@ -81,6 +85,7 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
           <dt>Collateral</dt><dd>{usdc(data.collateral)}</dd>
           <dt>YES / NO token</dt><dd><Address value={data.yesToken} /> · <Address value={data.noToken} /></dd>
           {data.result !== 0 && <><dt>Evidence</dt><dd>{data.resolutionEvidence}</dd></>}
+          {audit.data && <><dt>Audit trail</dt><dd><AuditRecordLine audit={audit.data.audit} address={market} /></dd></>}
         </dl>
       </Card>
       <div className="split">
@@ -121,6 +126,11 @@ export function MarketDetail({ market, query }: { market: string; query: URLSear
           )}
         </div>
       </div>
+      {audit.data && (
+        <AuditTrailCard id="audit" audit={audit.data.audit} highlightAddress={market}
+          verify={() => api.marketAudit(market, true).then(result => result.audit)}
+          outcomeLabel={position => group?.siblings.find(sibling => sibling.position === position)?.outcomeLabel} />
+      )}
     </div>
   );
 }

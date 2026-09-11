@@ -440,6 +440,7 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: va
 .badge.resolved { background: var(--yes-soft); color: var(--yes); border-color: var(--yes-border); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-border); }
 .badge.no { background: var(--no-soft); color: var(--no); border-color: var(--no-border); }
+a.badge:hover { text-decoration: none; filter: brightness(0.96); }
 
 /* Price tile — the loudest element on a market card. -------------------- */
 .prices { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin: var(--space-3) 0; }
@@ -528,6 +529,10 @@ table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 th, td { text-align: left; padding: var(--space-2); border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide); color: var(--muted); }
 .scroll { overflow-x: auto; }
+/* The row an audit trail is being read for, among its siblings' statements. */
+tr.highlight td { background: var(--accent-soft); }
+/* A card that is an anchor target lands below the sticky top bar, not under it. */
+.card[id] { scroll-margin-top: 5rem; }
 dl.kv { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
 dl.kv dt { color: var(--muted); }
 dl.kv dd { margin: 0; overflow-wrap: anywhere; }

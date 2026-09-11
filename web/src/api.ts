@@ -25,7 +25,7 @@ export type AppConfig = {
   audit: {
     available: boolean; schema: string; types: string[]; network: string;
     topicId: string | null; topicUrl: string | null; mirrorNodeUrl: string;
-    delivery: string; deliveryNote: string; reason: string; note: string;
+    delivery: string; deliveryNote: string; reason: string | null; note: string;
   };
   ai: { provider: string; mode: 'live' | 'development' };
   world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'sandbox' | 'staging' | 'production' };
@@ -207,6 +207,19 @@ export type AuditTrail = {
   events: AuditEventView[];
   verification?: { eventId: string; checked: boolean; matches: boolean; reason?: string | null; url?: string }[];
 };
+/** The trail behind an event, across every request that built it, read without a token. */
+export type EventAudit = {
+  event: { id: string; slug: string; title: string };
+  requests: { id: string; kind: 'SINGLE' | 'GROUP'; createdAt: string; statements: number }[];
+  audit: AuditTrail;
+};
+/** The trail of the request that deployed one market, with that market's own statement named. */
+export type MarketAudit = {
+  market: { address: string; position: number | null; outcomeLabel: string | null; eventId: string };
+  request: { id: string; kind: 'SINGLE' | 'GROUP'; createdAt: string };
+  event: { slug: string; title: string } | null;
+  audit: AuditTrail;
+};
 
 export type CreationRequest = {
   id: string; status: string; question: string; requesterKind: string; requester: string;
@@ -295,6 +308,10 @@ export const api = {
   market: (id: string) => request<{ indexedBlock: number; market: Market; book: MarketBook; event: MarketEventContext | null }>(`/api/markets/${id}`),
   events: () => request<EventList>('/api/events'),
   event: (slug: string) => request<EventDetail>(`/api/events/${encodeURIComponent(slug)}`),
+  eventAudit: (slug: string, verify = false) =>
+    request<EventAudit>(`/api/audit/events/${encodeURIComponent(slug)}${verify ? '?verify=1' : ''}`),
+  marketAudit: (address: string, verify = false) =>
+    request<MarketAudit>(`/api/audit/markets/${address}${verify ? '?verify=1' : ''}`),
   positions: (account: string) => request<{ indexedBlock: number; positions: Position[] }>(`/api/positions/${account}`),
   makerCurves: (account: string) => request<{ indexedBlock: number; curves: MakerCurve[] }>(`/api/curves/${account}`),
   marketBudgets: (market: string, maker: string) => request<MarketBudgets>(`/api/markets/${market}/budgets/${maker}`),

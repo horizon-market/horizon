@@ -2,14 +2,15 @@ import { lazy, Suspense, useState } from 'react';
 import type { RpContext } from '@worldcoin/idkit';
 import {
   api, ApiError,
-  type AuditTrail, type CreationRequest, type ExistingImport, type ImportPreviewResult, type ImportWarning,
+  type CreationRequest, type ExistingImport, type ImportPreviewResult, type ImportWarning,
   type MarketDraft, type PaymentRequirements, type PaymentResource, type RequestChild,
 } from '../api';
 import { useLocalState } from '../hooks';
 import { CREATION_LABEL, forgetCreation, isDiscardable, rememberCreation, type Saved } from '../creations';
 import { useConfig, useWallet } from '../App';
 import { Address, Badge, Card, Notice, TxLink, describe } from '../components/Ui';
-import { dateTime, formatUnits, short } from '../format';
+import { AuditTrailCard } from '../components/AuditTrail';
+import { dateTime, formatUnits } from '../format';
 
 const WorldVerification = lazy(() => import('../components/WorldVerification').then(module => ({ default: module.WorldVerification })));
 
@@ -115,7 +116,7 @@ export function CreateMarket() {
               if (result) setRequest(result.request);
             }} onReset={release} />
           )}
-          <AuditTrailCard request={request} saved={saved} />
+          <AuditTrailCard audit={request.audit} verify={() => api.getAudit(saved.id, saved.token, true).then(result => result.audit)} />
           <StartOver request={request} busy={busy} onRelease={release}
             onDiscard={async () => {
               const result = await act(() => api.abandon(saved.id, saved.token));
@@ -898,107 +899,6 @@ function Payment({ request, saved, busy, act, onPaid }: { request: CreationReque
   );
 }
 
-
-// ---------------------------------------------------------------------------
-// The public audit trail.
-// ---------------------------------------------------------------------------
-
-const AUDIT_LABEL: Record<string, string> = {
-  DRAFT_APPROVED: 'Draft approved', PAYMENT_SETTLED: 'Payment settled', MARKET_CREATED: 'Market created',
-};
-const AUDIT_STATUS: Record<string, string> = {
-  PENDING: 'Pending', PUBLISHING: 'Publishing', UNCONFIRMED: 'Unconfirmed', PUBLISHED: 'Published', FAILED: 'Not published',
-};
-const AUDIT_BADGE: Record<string, 'open' | 'closed' | 'resolved' | 'warn' | 'no'> = {
-  PENDING: 'open', PUBLISHING: 'open', UNCONFIRMED: 'warn', PUBLISHED: 'resolved', FAILED: 'no',
-};
-
-/**
- * What Horizon has published about this request on the Hedera Consensus Service, and what that
- * does and does not mean. Three states are kept apart on purpose: a statement is pending until it
- * reaches consensus, unconfirmed when its submission outcome is unknown, and published only with
- * a consensus timestamp and a sequence number anyone can read back for themselves.
- */
-function AuditTrailCard({ request, saved }: { request: CreationRequest; saved: Saved }) {
-  const [trail, setTrail] = useState<AuditTrail | undefined>(request.audit);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>();
-  const audit = trail ?? request.audit;
-  if (!audit || audit.events.length === 0) return null;
-  const verification = new Map((audit.verification ?? []).map(entry => [entry.eventId, entry]));
-  const published = audit.events.filter(event => event.status === 'PUBLISHED').length;
-
-  const check = async () => {
-    setBusy(true); setError(undefined);
-    try { setTrail((await api.getAudit(saved.id, saved.token, true)).audit); }
-    catch (issue) { setError(issue instanceof ApiError ? describe(issue.code) : 'The mirror node could not be read.'); }
-    finally { setBusy(false); }
-  };
-
-  return (
-    <Card
-      title="Public audit trail"
-      actions={audit.available && published > 0
-        ? <button disabled={busy} onClick={() => void check()}>{busy ? 'Checking…' : 'Verify on the mirror node'}</button>
-        : undefined}
-    >
-      <p className="small muted">
-        Hedera Consensus Service records <strong>Horizon&rsquo;s own statements</strong> about this request and the order in
-        which it made them. It does not independently verify the Hedera payment, the Sepolia deployment, or the eventual
-        outcome of a market &mdash; each of those is checked at its own source, and the references published here are what
-        let you check them.
-      </p>
-      {audit.available
-        ? <p className="small muted">
-            Topic <a className="mono" href={audit.topicUrl ?? '#'} target="_blank" rel="noreferrer">{audit.topicId}</a> on
-            Hedera {audit.network} &middot; schema <span className="mono">{audit.schema}</span> &middot; delivery is
-            at least once, so a statement whose submission outcome was unknown can appear twice. Deduplicate by event id.
-          </p>
-        : <Notice kind="info">No topic is configured on this deployment, so nothing has been published yet. Every statement below is recorded and can be published later.</Notice>}
-      {error && <Notice kind="error">{error}</Notice>}
-      <div className="scroll">
-        <table>
-          <thead><tr><th>Statement</th><th>Publication</th><th>Consensus timestamp</th><th>Record</th></tr></thead>
-          <tbody>
-            {audit.events.map(event => {
-              const checked = verification.get(event.eventId);
-              return (
-                <tr key={event.eventId}>
-                  <td>
-                    {AUDIT_LABEL[event.type] ?? event.type}
-                    <div className="small muted mono">{short(event.eventId)}</div>
-                  </td>
-                  <td>
-                    <Badge kind={AUDIT_BADGE[event.status] ?? 'open'}>{AUDIT_STATUS[event.status] ?? event.status}</Badge>
-                    {event.status === 'UNCONFIRMED' && <div className="small muted">Submitted; the outcome is unknown and is being reconciled against the mirror node.</div>}
-                    {event.failureCode && event.status !== 'PUBLISHED' && <div className="small muted">{event.failureCode}</div>}
-                    {checked && <div className="small muted">{checked.matches ? 'Read back from the mirror node and matched byte for byte.' : `Not verified: ${checked.reason ?? 'unknown'}.`}</div>}
-                  </td>
-                  <td>
-                    {event.consensusAt
-                      ? <>
-                          {dateTime(event.consensusAt)}
-                          {event.backfilled && <div className="small muted">Recorded after the fact: this is when Horizon published the statement, not when the event happened ({dateTime(event.occurredAt)}).</div>}
-                        </>
-                      : <span className="muted">&mdash; <span className="small">not yet at consensus</span></span>}
-                  </td>
-                  <td>
-                    {event.mirrorUrl
-                      ? <>
-                          <a className="mono" href={event.mirrorUrl} target="_blank" rel="noreferrer">#{event.sequenceNumber}</a>
-                          {event.transactionUrl && <> &middot; <a className="mono" href={event.transactionUrl} target="_blank" rel="noreferrer">{short(event.transactionId ?? '')}</a></>}
-                        </>
-                      : <span className="muted">&mdash;</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
 
 /**
  * What happened after payment. For a group this is per child: each one is an independent

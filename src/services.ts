@@ -97,7 +97,9 @@ export function publicConfig(config: Config, services: ReturnType<typeof buildSe
       topicUrl: services.audit.configured ? `${config.audit.explorerBase.replace(/\/$/, '')}/topic/${config.audit.topicId}` : null,
       mirrorNodeUrl: config.audit.mirrorNodeUrl,
       delivery: 'at_least_once', deliveryNote: AUDIT_DELIVERY_NOTE,
-      reason: config.audit.reason, note: AUDIT_DISCLOSURE,
+      // The reason only applies while there is no trail to read. With a topic configured this
+      // process serves the trail; whether it can also sign is the worker's concern, not a warning.
+      reason: services.audit.configured ? null : config.audit.reason, note: AUDIT_DISCLOSURE,
     },
     events: {
       // Grouping is service metadata. Every child is an independent binary market with its own

@@ -11,9 +11,9 @@ export function Logo({ size = 30, wordmark = true }: { size?: number; wordmark?:
   );
 }
 
-export function Card({ title, actions, children }: { title?: ReactNode; actions?: ReactNode; children: ReactNode }) {
+export function Card({ title, actions, id, children }: { title?: ReactNode; actions?: ReactNode; id?: string; children: ReactNode }) {
   return (
-    <section className="card">
+    <section className="card" id={id}>
       {(title || actions) && <div className="row between" style={{ marginBottom: '.5rem' }}><h2 style={{ margin: 0 }}>{title}</h2>{actions}</div>}
       {children}
     </section>
@@ -98,6 +98,7 @@ const MESSAGES: Record<string, string> = {
   // Events, groups and imports.
   events_not_configured: 'Event grouping is not configured on this API.',
   unknown_event: 'That event does not exist on Horizon.',
+  audit_unavailable: 'The public audit trail could not be read right now.',
   event_data_unavailable: 'Event data could not be read right now.',
   imports_not_configured: 'Importing definitions is not enabled on this deployment.',
   import_url_invalid: 'That does not look like a web address. Paste a Polymarket event or market page address.',

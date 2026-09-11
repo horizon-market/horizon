@@ -15,6 +15,7 @@ import { tradingRoutes } from './trading/http.js';
 import { creationRoutes } from './creation/http.js';
 import { adminRoutes } from './admin/http.js';
 import { eventRoutes } from './events/http.js';
+import { auditRoutes } from './audit/http.js';
 import { buildServices, publicConfig, type QueueBindings } from './services.js';
 
 AdminJS.registerAdapter({ Database, Resource });
@@ -57,6 +58,7 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
   app.use('/api/creation', creationRoutes(services.creation));
   app.get('/api/config', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }),
     (_req, res) => res.json(publicConfig(config, services)));
+  app.use('/api/audit', auditRoutes(services.audit));
   app.use('/api', eventRoutes(services.events, services.markets));
   app.use('/api', tradingRoutes(config.trading, services.markets, services.events));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok', service: 'horizon-api' }));

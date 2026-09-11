@@ -167,6 +167,11 @@ The migration is additive: no existing table or column changes, and a request wi
 | `HEDERA_MIRROR_NODE_URL` | testnet mirror | Used to reconcile unknown submissions and to verify published contents. |
 | `HEDERA_AUDIT_PUBLISH_INTERVAL_MS` | `20000` | How often the worker sweeps the outbox. |
 
+The API process needs only `HEDERA_AUDIT_TOPIC_ID` and `HEDERA_MIRROR_NODE_URL` to serve the
+public trail (`/api/audit/events/:slug`, `/api/audit/markets/:address`, and the request view);
+with a topic configured, `/api/config` reports `audit.reason` as `null` on that process. The
+signer belongs to the worker alone.
+
 Notes for whoever runs it next:
 
 - **Delivery is at least once.** HCS orders and timestamps messages; it does not deduplicate
@@ -281,6 +286,11 @@ npm run db:migrate              # adds CurveProjection.admitted
 npm run deploy:phase2           # clear router/executor from deployments/sepolia.json first
 npm run subgraph:prepare && npm run subgraph:codegen && npm run subgraph:deploy
 ```
+
+The API process needs only `HEDERA_AUDIT_TOPIC_ID` and `HEDERA_MIRROR_NODE_URL` to serve the
+public trail (`/api/audit/events/:slug`, `/api/audit/markets/:address`, and the request view);
+with a topic configured, `/api/config` reports `audit.reason` as `null` on that process. The
+signer belongs to the worker alone.
 
 Notes for whoever runs it next:
 
