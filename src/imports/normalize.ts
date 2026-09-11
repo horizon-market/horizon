@@ -14,6 +14,9 @@ import { eventUrl, marketUrl, type GammaEvent, type GammaMarket } from './polyma
 export type Severity = 'blocking' | 'review' | 'info';
 export type ImportWarning = { code: string; severity: Severity; message: string };
 
+/** What Horizon's YES and NO stand for when the source calls its sides something else. */
+export type OutcomeMapping = { yes: string; no: string; method: 'total' | 'spread' | 'moneyline' | 'generic' };
+
 export type NormalizedDates = {
   /** What Horizon will close trading at, in ISO 8601. */
   tradingCloseAt: string | null;
@@ -36,6 +39,8 @@ export type NormalizedChild = {
   warnings: ImportWarning[];
   /** Every change made to the source text so it can settle on Horizon, stated plainly. */
   ruleChanges: string[];
+  /** Present when the source names its two sides something other than Yes/No. */
+  outcomeMapping?: OutcomeMapping;
   dates: NormalizedDates;
   source: {
     provider: 'polymarket';
@@ -168,7 +173,7 @@ const EVENT_SNAPSHOT_FIELDS = ['id', 'ticker', 'slug', 'title', 'description', '
 const MARKET_SNAPSHOT_FIELDS = ['id', 'question', 'conditionId', 'slug', 'description', 'resolutionSource', 'outcomes',
   'startDate', 'endDate', 'endDateIso', 'startDateIso', 'gameStartTime', 'closedTime', 'groupItemTitle', 'groupItemThreshold',
   'image', 'icon', 'active', 'closed', 'archived', 'restricted', 'resolvedBy', 'umaResolutionStatus', 'umaResolutionStatuses',
-  'umaBond', 'negRisk', 'negRiskMarketID', 'sportsMarketType', 'marketType'] as const;
+  'umaBond', 'negRisk', 'negRiskMarketID', 'sportsMarketType', 'marketType', 'line'] as const;
 
 const pick = (source: Record<string, unknown>, fields: readonly string[]) =>
   Object.fromEntries(fields.filter(field => source[field] !== undefined && source[field] !== null).map(field => [field, source[field]]));
@@ -204,6 +209,78 @@ export function mapDates(market: GammaMarket, event: GammaEvent): NormalizedDate
   return { tradingCloseAt: new Date(Math.min(start, end)).toISOString(), sourceEndDate, sourceStartDate, sourceGameStart, ambiguous: true };
 }
 
+/** The rules sentence that binds Horizon's YES and NO to the names the source's criteria use. */
+export const outcomeMappingClause = (yes: string, no: string) =>
+  `Outcome mapping: where the criteria above resolve to "${yes}", Horizon resolves YES; where they resolve to "${no}", Horizon resolves NO. `
+  + 'Where they call for a 50-50, void or refunded result, Horizon resolves INVALID.';
+
+const NUMBER = String.raw`[+-]?\d+(?:\.\d+)?`;
+const ORDINALS = ['1st', '2nd', '3rd', '4th'];
+
+/** `1Q` reads as "in the 1st quarter", `2H` as "in the 2nd half"; any other prefix is kept as written. */
+function periodPhrase(prefix: string | undefined): string {
+  const token = (prefix ?? '').trim();
+  if (!token) return '';
+  const quarter = /^([1-4])Q$/i.exec(token);
+  if (quarter) return ` in the ${ORDINALS[Number(quarter[1]) - 1]} quarter`;
+  const half = /^([12])H$/i.exec(token);
+  if (half) return ` in the ${ORDINALS[Number(half[1]) - 1]} half`;
+  return ` in the ${token.toLowerCase()}`;
+}
+
+/** True unless the source publishes a numeric line that disagrees with the number its question names. */
+const lineAgrees = (market: GammaMarket, value: string) => {
+  const line = string(market.line);
+  return !line || Number(line) === Number(value);
+};
+
+const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+export type BinaryRewrite = { question: string; outcomeLabel?: string; method: OutcomeMapping['method'] };
+
+/**
+ * Rewrites a two-outcome source question so that YES plainly means the first outcome and NO the
+ * second. The sports shapes Polymarket publishes as shorthand get a natural question; anything
+ * else states the mapping in the question itself. Nothing is inferred beyond what the question
+ * and the labels already say, and a line the source publishes must agree with the question.
+ */
+export function mapBinaryOutcomes(market: GammaMarket, question: string, outcomes: readonly [string, string]): BinaryRewrite {
+  const [yes, no] = outcomes;
+
+  // Totals: "Commanders vs. Eagles: O/U 42.5", "Eagles Team Total: O/U 18.5". Over is YES.
+  if (sameLabel(yes, 'Over') && sameLabel(no, 'Under')) {
+    const total = new RegExp(String.raw`^(.*?)\s*:?\s*O/U\s*(${NUMBER})$`, 'i').exec(question);
+    const [subject, line] = [total?.[1]?.trim() ?? '', total?.[2] ?? ''];
+    if (subject && line && lineAgrees(market, line)) {
+      // "Commanders vs. Eagles: 1H" carries its period after a colon; it reads better after the line.
+      const period = /^(.+?)\s*:\s*([1-4]Q|[12]H)$/i.exec(subject);
+      return { question: `Will ${period?.[1] ?? subject} go over ${line}${periodPhrase(period?.[2])}?`, method: 'total' };
+    }
+  }
+
+  // Spreads: "Spread: Eagles (-1.5)", "1Q Spread: Eagles (-0.5)". The named team covering is YES.
+  const spread = new RegExp(String.raw`^(?:(.+?)\s+)?Spread:\s*(.+?)\s*\((${NUMBER})\)$`, 'i').exec(question);
+  const [period, team, line] = [spread?.[1]?.trim() ?? '', spread?.[2] ?? '', spread?.[3] ?? ''];
+  if (team && line && sameLabel(team, yes) && lineAgrees(market, line)) {
+    return {
+      question: `Will the ${yes} cover ${line} against the ${no}${periodPhrase(period)}?`,
+      // The source's group label is "Spread -1.5" for both teams' lines; the child needs a name of its own.
+      outcomeLabel: `${period ? `${period} ` : ''}${yes} (${line})`,
+      method: 'spread',
+    };
+  }
+
+  // Moneyline: "Commanders vs. Eagles", "Commanders vs. Eagles: 2H Moneyline". The first outcome winning is YES.
+  const moneyline = /^(.+?)\s+vs\.?\s+(.+?)(?:\s*:\s*(.+?)\s+Moneyline)?$/i.exec(question);
+  const sides = [moneyline?.[1] ?? '', moneyline?.[2] ?? ''];
+  if (sides.some(side => sameLabel(side, yes)) && sides.some(side => sameLabel(side, no))) {
+    return { question: `Will the ${yes} beat the ${no}${periodPhrase(moneyline?.[3])}?`, method: 'moneyline' };
+  }
+
+  const suffix = ` — YES = ${yes}, NO = ${no}`;
+  return { question: `${clip(question, MAX_QUESTION - suffix.length)}${suffix}`, method: 'generic' };
+}
+
 function childLabel(market: GammaMarket, question: string): string {
   const grouped = string(market.groupItemTitle);
   if (grouped) return clip(grouped, 80);
@@ -222,7 +299,38 @@ function normalizeChild(market: GammaMarket, event: GammaEvent, position: number
   const closed = bool(market.closed), archived = bool(market.archived);
   const active = market.active === undefined || market.active === null ? true : bool(market.active);
 
+  // Horizon markets are fully collateralized YES/NO pairs. A source market with exactly two real
+  // outcomes is one of those whatever it calls its sides, and the mapping is then stated wherever
+  // a reviewer, a trader or the resolver will read it. Anything else is not importable, and the
+  // actual outcome labels are named so a reviewer can see what was refused.
+  const [first = '', second = ''] = outcomes;
+  const twoSided = outcomes.length === 2 && !sameLabel(first, second);
+  const literal = twoSided && outcomes.map(entry => entry.toLowerCase()).sort().join('/') === 'no/yes';
+  const placeholderOutcome = twoSided && !literal ? outcomes.find(isPlaceholderLabel) : undefined;
   let question = rawQuestion;
+  let rewrite: BinaryRewrite | undefined;
+  let mapping: OutcomeMapping | undefined;
+  if (!twoSided) {
+    warnings.push(warn('unsupported_outcomes', 'blocking',
+      outcomes.length === 0
+        ? 'The source market publishes no outcome labels, so Horizon cannot confirm it is a two-sided market.'
+        : outcomes.length === 2
+          ? `Both of this source market's outcomes are named "${first}", so Horizon cannot tell its sides apart.`
+          : `Horizon creates two-sided YES/NO markets only. This source market offers ${outcomes.length} outcome${outcomes.length === 1 ? '' : 's'}: ${outcomes.join(', ')}.`));
+  } else if (placeholderOutcome) {
+    warnings.push(warn('placeholder_outcome', 'blocking',
+      `"${placeholderOutcome}" is a placeholder the source has not filled in yet, not a real outcome. It is left out rather than created as a market nobody can resolve.`));
+  } else if (!literal && rawQuestion) {
+    const [yes, no] = [first, second];
+    rewrite = mapBinaryOutcomes(market, rawQuestion, [yes, no]);
+    mapping = { yes, no, method: rewrite.method };
+    question = rewrite.question;
+    ruleChanges.push(`The source names its outcomes "${yes}" and "${no}", not YES/NO. On Horizon YES stands for "${yes}" and NO for "${no}". `
+      + `The question was rewritten from "${rawQuestion}" to "${question}", and the mapping is stated in the rules.`);
+    warnings.push(warn('outcomes_mapped', 'review',
+      `The source's outcomes are "${yes}" and "${no}", not YES/NO. Horizon maps YES to "${yes}" and NO to "${no}"; check that the rewritten question says what the source market says.`));
+  }
+
   if (question.length > MAX_QUESTION) {
     question = clip(question, MAX_QUESTION);
     ruleChanges.push(`The source question is longer than Horizon's ${MAX_QUESTION}-character limit and was shortened to "${question}". The full text is kept in the source snapshot.`);
@@ -232,15 +340,6 @@ function normalizeChild(market: GammaMarket, event: GammaEvent, position: number
     warnings.push(warn('question_too_short', 'blocking', `Horizon needs a question of at least ${MIN_QUESTION} characters; the source supplied ${question.length}.`));
   }
 
-  // Horizon markets are fully collateralized YES/NO pairs. Anything else is not importable, and
-  // the actual outcome labels are named so a reviewer can see what was refused.
-  const binary = outcomes.length === 2 && outcomes.map(entry => entry.toLowerCase()).join('/') === 'yes/no';
-  if (!binary) {
-    warnings.push(warn('unsupported_outcomes', 'blocking',
-      outcomes.length === 0
-        ? 'The source market publishes no outcome labels, so Horizon cannot confirm it is a YES/NO market.'
-        : `Horizon creates YES/NO markets only. This source market offers ${outcomes.length} outcome${outcomes.length === 1 ? '' : 's'}: ${outcomes.join(', ')}.`));
-  }
   if (closed || archived || !active) {
     warnings.push(warn('source_market_closed', 'blocking',
       `The source market is ${[closed && 'closed', archived && 'archived', !active && 'inactive'].filter(Boolean).join(' and ')}. A finished question cannot be opened for trading on Horizon.`));
@@ -250,7 +349,8 @@ function normalizeChild(market: GammaMarket, event: GammaEvent, position: number
       `The source market has a resolution status of ${umaStatuses.join(', ')}. Confirm the question is still undecided before creating it on Horizon.`));
   }
 
-  const outcomeLabel = childLabel(market, question);
+  // A rewritten question is not the child's name; the source's own wording still is.
+  const outcomeLabel = rewrite?.outcomeLabel ?? childLabel(market, rewrite ? rawQuestion : question);
   const placeholder = isPlaceholderLabel(outcomeLabel) || isPlaceholderLabel(string(market.groupItemTitle));
   if (placeholder) {
     warnings.push(warn('placeholder_outcome', 'blocking',
@@ -263,14 +363,15 @@ function normalizeChild(market: GammaMarket, event: GammaEvent, position: number
   if (!sourceRules) {
     warnings.push(warn('missing_source_rules', 'blocking', 'The source publishes no resolution criteria for this market, so Horizon has nothing to resolve against.'));
   }
-  const budget = MAX_RULES - HORIZON_SETTLEMENT_CLAUSE.length - 2;
+  const mappingClause = mapping ? outcomeMappingClause(mapping.yes, mapping.no) : '';
+  const budget = MAX_RULES - HORIZON_SETTLEMENT_CLAUSE.length - 2 - (mappingClause ? mappingClause.length + 2 : 0);
   const keptRules = sourceRules.length > budget ? clip(sourceRules, budget) : sourceRules;
   if (keptRules !== sourceRules) {
     ruleChanges.push(`The source criteria are longer than Horizon's ${MAX_RULES}-character limit and were shortened. The full text is kept in the source snapshot.`);
     warnings.push(warn('rules_shortened', 'review', 'The source resolution criteria were too long for Horizon and have been shortened. Review what remains before approving.'));
   }
   ruleChanges.push('Horizon settlement terms were appended: the disclosed Horizon resolver decides YES, NO or INVALID, and INVALID pays 0.5 USDC per outcome token. Settlement is not delegated to Polymarket or UMA.');
-  const rules = `${keptRules}\n\n${HORIZON_SETTLEMENT_CLAUSE}`;
+  const rules = [keptRules, mappingClause, HORIZON_SETTLEMENT_CLAUSE].filter(Boolean).join('\n\n');
 
   const evidenceSource = clip(
     string(market.resolutionSource) || string(event.resolutionSource)
@@ -318,6 +419,7 @@ function normalizeChild(market: GammaMarket, event: GammaEvent, position: number
     position, outcomeLabel, question, draft, supported,
     preselected: supported && !placeholder,
     warnings, ruleChanges, dates,
+    ...(mapping ? { outcomeMapping: mapping } : {}),
     source: {
       provider: 'polymarket', marketId: string(market.id), slug,
       url: marketUrl(string(event.slug) || undefined, slug), conditionId: string(market.conditionId),

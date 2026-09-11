@@ -91,6 +91,34 @@
       "active": true,
       "closed": false,
       "archived": false
+    },
+    {
+      "id": "990106",
+      "question": "Which side will win the synthetic bracket final?",
+      "conditionId": "0x6666666666666666666666666666666666666666666666666666666666666666",
+      "slug": "synthetic-two-placeholders",
+      "description": "Resolves to the winning side once both sides are known. Neither side has been filled in yet.",
+      "outcomes": "[\"Team A\", \"Team B\"]",
+      "outcomePrices": "[\"0.5\", \"0.5\"]",
+      "groupItemTitle": "Bracket final",
+      "endDate": "2026-12-01T00:00:00Z",
+      "active": true,
+      "closed": false,
+      "archived": false
+    },
+    {
+      "id": "990107",
+      "question": "Synthetic total with two identical outcome labels: O/U 9.5",
+      "conditionId": "0x7777777777777777777777777777777777777777777777777777777777777777",
+      "slug": "synthetic-duplicate-labels",
+      "description": "Resolves to Over if the total exceeds 9.5. Both outcome labels are the same string, so the sides cannot be told apart.",
+      "outcomes": "[\"Over\", \"Over\"]",
+      "outcomePrices": "[\"0.5\", \"0.5\"]",
+      "groupItemTitle": "Same label twice",
+      "endDate": "2026-12-01T00:00:00Z",
+      "active": true,
+      "closed": false,
+      "archived": false
     }
   ]
 }

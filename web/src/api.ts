@@ -163,6 +163,8 @@ export type GroupQuote = {
   unitUnits: string; quantity: number; totalUnits: string; discountedTotalUnits: string;
   discountBps: number; asset: string; assetDecimals: number; network: string; note: string;
 };
+/** What Horizon's YES and NO stand for when the source names its two sides something else. */
+export type OutcomeMapping = { yes: string; no: string; method: 'total' | 'spread' | 'moneyline' | 'generic' };
 /** What the importer read from a source page, and what Horizon would create from it. */
 export type ImportPreview = {
   title: string; description: string; category: string; tags: string[];
@@ -173,6 +175,7 @@ export type ImportPreview = {
   children: {
     position: number; outcomeLabel: string; question: string; draft: MarketDraft | null;
     supported: boolean; preselected: boolean; warnings: ImportWarning[]; ruleChanges: string[]; dates: ImportDates;
+    outcomeMapping?: OutcomeMapping;
     source: { provider: string; marketId: string; slug: string; url: string; conditionId: string; outcomes: string[];
       description: string; resolutionSource: string; resolvedBy: string; umaResolutionStatuses: string[];
       closed: boolean; active: boolean; archived: boolean; imageUrl: string };
@@ -249,7 +252,7 @@ export type CreationRequest = {
       provider: string; url: string; kind: string; eventId: string; eventSlug: string; importedAt: string;
       eventWarnings: ImportWarning[];
       children: { position: number; outcomeLabel: string; question: string; supported: boolean; selected: boolean;
-        warnings: ImportWarning[]; ruleChanges: string[]; dates: ImportDates;
+        warnings: ImportWarning[]; ruleChanges: string[]; dates: ImportDates; outcomeMapping?: OutcomeMapping | null;
         source: { marketId: string; slug: string; url: string; conditionId: string; outcomes: string[]; resolutionSource: string; closed: boolean } }[];
       sourceRules: { position: number; description: string }[];
     };

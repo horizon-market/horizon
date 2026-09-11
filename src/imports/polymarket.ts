@@ -109,7 +109,7 @@ export const gammaMarketSchema = z.object({
   groupItemTitle: text, groupItemThreshold: text, image: text, icon: text,
   active: flag, closed: flag, archived: flag, restricted: flag, acceptingOrders: flag,
   resolvedBy: text, umaResolutionStatus: text, umaResolutionStatuses: loose, umaBond: text,
-  negRisk: flag, negRiskMarketID: text, sportsMarketType: text, marketType: text,
+  negRisk: flag, negRiskMarketID: text, sportsMarketType: text, marketType: text, line: text,
   tags: z.array(gammaTagSchema).nullish(),
 }).loose();
 export const gammaEventSchema = z.object({

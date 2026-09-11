@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { GammaClient, ImportError, gammaEventSchema, parsePolymarketUrl, POLYMARKET_API_ORIGIN, SUPPORTED_URL_SHAPES } from '../src/imports/polymarket.js';
 import {
-  HORIZON_SETTLEMENT_CLAUSE, isPlaceholderLabel, jsonArray, normalizeEvent, outcomesComplete,
-  slugify, snapshotEvent, toInstant,
+  HORIZON_SETTLEMENT_CLAUSE, isPlaceholderLabel, jsonArray, mapBinaryOutcomes, normalizeEvent, outcomeMappingClause,
+  outcomesComplete, slugify, snapshotEvent, toInstant,
 } from '../src/imports/normalize.js';
 import { draftSchema } from '../src/creation/types.js';
 import { groupPrice } from '../src/creation/pricing.js';
@@ -15,6 +15,7 @@ const MATCH = fixture('polymarket-event-match');
 const CHAMPIONSHIP = fixture('polymarket-event-championship');
 const EDGE_CASES = fixture('polymarket-event-unsupported');
 const CLOSED = fixture('polymarket-event-closed');
+const NFL_GAME = fixture('polymarket-event-nfl-game');
 // The fixtures carry fixed source dates, so every date judgement is evaluated against a fixed now.
 const NOW = new Date('2026-09-01T00:00:00Z');
 const bounds = { minSeconds: 3600, maxSeconds: 365 * 24 * 3600 };
@@ -123,6 +124,85 @@ test('a three-way match imports as three independent YES/NO markets under one ex
   assert.equal(outcomesComplete(event, new Set([0, 2])), false);
 });
 
+test('two-outcome markets that are not labelled Yes/No import with YES and NO mapped to the source\'s sides', () => {
+  const event = normalizeEvent(NFL_GAME, { now: NOW, bounds });
+  assert.equal(event.title, 'Commanders vs. Eagles');
+  assert.deepEqual(codes(event.warnings), []);
+  assert.ok(event.children.every(child => child.supported && child.preselected));
+  const by = (question: string) => event.children.find(child => child.source.slug === NFL_GAME.markets!.find(market => market.question === question)!.slug)!;
+
+  // The recognised sports shapes become a natural question whose YES side is the first source outcome.
+  const expected: [string, string, string, string][] = [
+    ['Commanders vs. Eagles', 'Will the Commanders beat the Eagles?', 'Commanders vs. Eagles', 'moneyline'],
+    ['Commanders vs. Eagles: 2H Moneyline', 'Will the Commanders beat the Eagles in the 2nd half?', '2H Moneyline', 'moneyline'],
+    ['Spread: Eagles (-1.5)', 'Will the Eagles cover -1.5 against the Commanders?', 'Eagles (-1.5)', 'spread'],
+    ['Spread: Commanders (-1.5)', 'Will the Commanders cover -1.5 against the Eagles?', 'Commanders (-1.5)', 'spread'],
+    ['1Q Spread: Eagles (-0.5)', 'Will the Eagles cover -0.5 against the Commanders in the 1st quarter?', '1Q Eagles (-0.5)', 'spread'],
+    ['Commanders vs. Eagles: O/U 42.5', 'Will Commanders vs. Eagles go over 42.5?', 'O/U 42.5', 'total'],
+    ['Eagles Team Total: O/U 18.5', 'Will Eagles Team Total go over 18.5?', 'Eagles O/U 18.5', 'total'],
+    // Anything else with two real sides states the mapping in the question itself.
+    ['Commanders vs. Eagles: Team to Record Longest FG', 'Commanders vs. Eagles: Team to Record Longest FG — YES = Commanders, NO = Eagles', 'Team to Record Longest FG', 'generic'],
+  ];
+  for (const [source, question, label, method] of expected) {
+    const child = by(source);
+    assert.equal(child.question, question, source);
+    assert.equal(child.outcomeLabel, label, source);
+    assert.equal(child.outcomeMapping?.method, method, source);
+    assert.deepEqual([child.outcomeMapping?.yes, child.outcomeMapping?.no], child.source.outcomes, source);
+    // Horizon's pair is still YES/NO; the mapping is stated to the reviewer and, in the rules, to the resolver.
+    assert.equal(child.draft!.yesOutcome, 'YES');
+    assert.equal(child.draft!.noOutcome, 'NO');
+    const [yes, no] = child.source.outcomes as [string, string];
+    const clause = outcomeMappingClause(yes, no);
+    assert.ok(child.draft!.rules.startsWith(child.source.description.slice(0, 60)), source);
+    assert.ok(child.draft!.rules.endsWith(`${clause}\n\n${HORIZON_SETTLEMENT_CLAUSE}`), source);
+    assert.match(clause, new RegExp(`resolve to "${yes}", Horizon resolves YES`));
+    assert.match(clause, /50-50, void or refunded result, Horizon resolves INVALID/);
+    const mapped = child.warnings.find(warning => warning.code === 'outcomes_mapped')!;
+    assert.equal(mapped.severity, 'review');
+    assert.match(mapped.message, new RegExp(`YES to "${yes}" and NO to "${no}"`));
+    assert.ok(child.ruleChanges.some(change => change.includes(`rewritten from "${source}" to "${question}"`)), source);
+  }
+  // Both teams' -1.5 lines share the source label "Spread -1.5"; on Horizon each child is named for its own side.
+  assert.notEqual(by('Spread: Eagles (-1.5)').outcomeLabel, by('Spread: Commanders (-1.5)').outcomeLabel);
+
+  // Literal Yes/No markets on the same page are untouched.
+  for (const source of ['Exact Margin: Commanders by 25+', 'Commanders vs. Eagles: Safety?']) {
+    const child = by(source);
+    assert.equal(child.question, source);
+    assert.equal(child.outcomeMapping, undefined);
+    assert.ok(!codes(child.warnings).includes('outcomes_mapped'));
+    assert.ok(!child.draft!.rules.includes('Outcome mapping:'));
+  }
+  assert.equal(outcomesComplete(event, new Set(event.children.map(child => child.position))), true);
+});
+
+test('the sports rewrites only fire when the question and the source line agree; otherwise the mapping is stated generically', () => {
+  const rewrite = (question: string, outcomes: [string, string], line?: number) =>
+    mapBinaryOutcomes({ line } as Parameters<typeof mapBinaryOutcomes>[0], question, outcomes);
+  assert.deepEqual(rewrite('Spread: Atlanta Braves (-1.5)', ['Atlanta Braves', 'San Francisco Giants'], -1.5),
+    { question: 'Will the Atlanta Braves cover -1.5 against the San Francisco Giants?', outcomeLabel: 'Atlanta Braves (-1.5)', method: 'spread' });
+  assert.deepEqual(rewrite('1st 5 Innings Spread: San Francisco Giants (-1.5)', ['San Francisco Giants', 'Atlanta Braves'], -1.5),
+    { question: 'Will the San Francisco Giants cover -1.5 against the Atlanta Braves in the 1st 5 innings?', outcomeLabel: '1st 5 Innings San Francisco Giants (-1.5)', method: 'spread' });
+  assert.deepEqual(rewrite('San Francisco Giants vs. Atlanta Braves: 1st 5 Innings O/U 2.5', ['Over', 'Under'], 2.5),
+    { question: 'Will San Francisco Giants vs. Atlanta Braves: 1st 5 Innings go over 2.5?', method: 'total' });
+  assert.deepEqual(rewrite('Commanders vs. Eagles: 3Q O/U 3.5', ['Over', 'Under']),
+    { question: 'Will Commanders vs. Eagles go over 3.5 in the 3rd quarter?', method: 'total' });
+  assert.deepEqual(rewrite('Commanders vs. Eagles: 1Q Moneyline', ['Eagles', 'Commanders']),
+    { question: 'Will the Eagles beat the Commanders in the 1st quarter?', method: 'moneyline' });
+  // A published line that disagrees with the question is not silently trusted either way.
+  assert.equal(rewrite('Spread: Eagles (-1.5)', ['Eagles', 'Commanders'], -2.5).method, 'generic');
+  assert.equal(rewrite('Commanders vs. Eagles: O/U 42.5', ['Over', 'Under'], 44.5).method, 'generic');
+  // The named team must be the first outcome, and a "vs." question must name both outcomes.
+  assert.equal(rewrite('Spread: Eagles (-1.5)', ['Commanders', 'Eagles']).method, 'generic');
+  assert.equal(rewrite('Commanders vs. Eagles', ['Home', 'Away']).method, 'generic');
+  // The generic form keeps the mapping suffix intact inside Horizon's question limit.
+  const long = rewrite(`${'Very long synthetic source question '.repeat(8).trim()}?`, ['Alpha', 'Beta']);
+  assert.ok(long.question.length <= 200);
+  assert.ok(long.question.endsWith(' — YES = Alpha, NO = Beta'));
+  assert.ok(long.question.includes('…'));
+});
+
 test('imported markets carry no source prices, liquidity, volume or settlement state', () => {
   const event = normalizeEvent(MATCH, { now: NOW, bounds });
   const serialized = JSON.stringify({ event: { ...event, snapshot: snapshotEvent(MATCH) } });
@@ -158,6 +238,15 @@ test('each unsupported shape is refused for its own stated reason, and the rest 
   assert.equal(multi.supported, false);
   assert.ok(codes(multi.warnings).includes('unsupported_outcomes'));
   assert.match(multi.warnings.find(warning => warning.code === 'unsupported_outcomes')!.message, /Alice, Bob, Carol/);
+
+  // Two sides that are placeholders, or that share one name, are not a market anyone can resolve.
+  const unfilled = by('Bracket final');
+  assert.equal(unfilled.supported, false);
+  assert.match(unfilled.warnings.find(warning => warning.code === 'placeholder_outcome')!.message, /"Team A" is a placeholder/);
+  assert.equal(unfilled.outcomeMapping, undefined);
+  const twins = by('Same label twice');
+  assert.equal(twins.supported, false);
+  assert.match(twins.warnings.find(warning => warning.code === 'unsupported_outcomes')!.message, /both of this source market's outcomes are named "Over"/i);
 
   const settled = by('Already settled');
   assert.equal(settled.supported, false);

@@ -8,6 +8,8 @@
 - [WORLD_FEEDBACK.md](WORLD_FEEDBACK.md) — feedback on the World Selfie Check integration.
 - [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) — the interface language of the application.
 - [ROADMAP.md](ROADMAP.md) — build phases, product decisions and acceptance checks.
+- [DEMO_VIDEO.md](DEMO_VIDEO.md) — the finalist demo recording: preparation, the path through the
+  product, the spoken script, and how to record and check the file.
 
 Two claims run through all of it: **trading has no fee of any kind**, and the separate x402
 market-creation charge is the only payment the product takes.

@@ -429,10 +429,19 @@ become Horizon data, and they are excluded from the stored source snapshot.
   request path against the fixed `POLYMARKET_API_ORIGIN`. No user-supplied URL is ever fetched.
 - **Preview first.** `POST /api/creation/imports/preview` reports exactly what would be created and
   why anything is refused. It writes no row, charges nothing and deploys nothing.
-- **Refusals are explicit.** Closed, archived or inactive markets; outcome sets that are not
-  YES/NO, with the actual outcomes named; placeholder outcomes the source has not filled in
-  (`Team H`, `Other`, `TBD`); missing resolution criteria; and close times outside Horizon's
-  bounds, with the bound named. A blocking reason removes that child rather than repairing it.
+- **Two-sided markets import whatever they call their sides.** A source market with exactly two
+  real outcomes is a YES/NO market on Horizon: YES stands for the source's first outcome and NO
+  for its second. Polymarket's sports shorthand becomes a plain question (`Spread: Eagles (-1.5)`
+  → *Will the Eagles cover -1.5 against the Commanders?*; `Commanders vs. Eagles: O/U 42.5` →
+  *Will Commanders vs. Eagles go over 42.5?*; a moneyline → *Will the Commanders beat the
+  Eagles?*), and any other pair states the mapping in the question itself (`… — YES = Commanders,
+  NO = Eagles`). The mapping is also written into the rules for the resolver, listed as a change
+  in the review, and flagged for a reviewer to confirm. A literal Yes/No market is left as it is.
+- **Refusals are explicit.** Closed, archived or inactive markets; outcome sets with more or
+  fewer than two sides, or two sides with the same name, with the actual outcomes named;
+  placeholder outcomes the source has not filled in (`Team H`, `Other`, `TBD`); missing
+  resolution criteria; and close times outside Horizon's bounds, with the bound named. A blocking
+  reason removes that child rather than repairing it.
 - **Trading close is distinguished from event start and settlement.** Horizon's close time is when
   trading stops; the source's end date is when it settles the question. Where the source's start
   time and end date disagree, Horizon closes at the earlier of the two and marks the mapping as

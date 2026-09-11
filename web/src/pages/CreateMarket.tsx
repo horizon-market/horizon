@@ -517,7 +517,12 @@ function ChildPreview({ child, checked, disabled, onToggle }: {
       {open && (
         <div className="stack" style={{ marginTop: 'var(--space-2)' }}>
           <dl className="kv">
-            <dt>Source outcomes</dt><dd>{child.source.outcomes.join(' / ') || '—'}</dd>
+            <dt>Source outcomes</dt>
+            <dd>
+              {child.outcomeMapping
+                ? `${child.outcomeMapping.yes} (YES) / ${child.outcomeMapping.no} (NO)`
+                : child.source.outcomes.join(' / ') || '—'}
+            </dd>
             <dt>Trading closes</dt><dd>{child.dates.tradingCloseAt ? dateTime(child.dates.tradingCloseAt) : 'unknown'}</dd>
             <dt>Source start / end</dt>
             <dd>
