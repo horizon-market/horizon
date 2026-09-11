@@ -2,6 +2,43 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cumulative, type Curve } from '../src/trading/math.js';
 import { allocate, type Candidate } from '../src/trading/allocator.js';
+import { GraphProvider } from '../src/trading/graph.js';
+
+test('Graph diagnostics distinguish failures without exposing credentials or request data', async t => {
+  const endpoint = 'https://graph.test/api/path-secret-value/subgraphs/id/demo';
+  const apiKey = 'header-secret-value';
+  const graph = new GraphProvider(endpoint, apiKey);
+  const logs: unknown[][] = [];
+  t.mock.method(console, 'error', (...args: unknown[]) => logs.push(args));
+  const request = t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 401 }));
+  await assert.rejects(graph.query('{ markets { id } }'), /graph_unavailable/);
+  assert.equal((logs.at(-1)![1] as { status: number }).status, 401);
+
+  request.mock.mockImplementation(async () => Response.json({ errors: [{
+    message: `Unknown field admitted; ${endpoint}; path-secret-value; ${apiKey}`,
+  }] }));
+  await assert.rejects(graph.query('{ markets { id } }', { secret: 'private-variable' }), /graph_query_failed/);
+  assert.match(JSON.stringify(logs), /Unknown field admitted/);
+  for (const secret of [endpoint, 'path-secret-value', apiKey, 'private-variable']) {
+    assert.equal(JSON.stringify(logs).includes(secret), false);
+  }
+
+  request.mock.mockImplementation(async () => { throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }); });
+  await assert.rejects(graph.query('{}'), /graph_unavailable/);
+  assert.equal((logs.at(-1)![1] as { networkCode: string }).networkCode, 'ENOTFOUND');
+  request.mock.mockImplementation(async () => { throw new DOMException('timed out', 'TimeoutError'); });
+  await assert.rejects(graph.query('{}'), /graph_unavailable/);
+  assert.equal((logs.at(-1)![1] as { timeout: boolean }).timeout, true);
+
+  request.mock.mockImplementation(async () => new Response('<html>not JSON</html>'));
+  await assert.rejects(graph.query('{}'), /graph_unavailable/);
+  assert.equal((logs.at(-1)![1] as { stage: string }).stage, 'json');
+
+  const count = logs.length;
+  request.mock.mockImplementation(async () => Response.json({ data: { markets: [] } }));
+  assert.deepEqual(await graph.query('{}'), { markets: [] });
+  assert.equal(logs.length, count);
+});
 const address = '0x0000000000000000000000000000000000000001';
 const zeroHash = `0x${'0'.repeat(64)}` as const;
 const curve: Curve = { market: address, flags: 6, startPrice: 400000, endPrice: 200000, maxShares: 10_000_000n, salt: zeroHash };

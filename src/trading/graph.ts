@@ -79,14 +79,46 @@ export class GraphError extends Error {}
 export class GraphProvider {
   constructor(private url: string, private apiKey?: string) {}
   async query(query: string, variables: Record<string, unknown> = {}): Promise<unknown> {
+    const started = Date.now();
+    let stage = 'request';
+    let status: number | undefined;
+    let queryErrors: string[] | undefined;
+    // Gateway URLs can contain API keys in their path. Never log URLs, headers or variables.
+    const redact = (message: string) => {
+      let safe = message.replaceAll(this.url, '[endpoint]');
+      if (this.apiKey) safe = safe.replaceAll(this.apiKey, '[redacted]');
+      try {
+        const url = new URL(this.url);
+        for (const value of [url.username, url.password, ...url.pathname.split('/'), ...url.searchParams.values()]) {
+          if (value.length >= 8) safe = safe.replaceAll(value, '[redacted]');
+        }
+      } catch { /* Invalid URLs are diagnosed below without printing their value. */ }
+      return safe.replace(/https?:\/\/\S+/gi, '[url]').replace(/Bearer\s+\S+/gi, 'Bearer [redacted]').slice(0, 500);
+    };
     try {
       const response = await fetch(this.url, { method: 'POST', headers: { 'content-type': 'application/json',
         ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) }, signal: AbortSignal.timeout(15_000), body: JSON.stringify({ query, variables }) });
+      status = response.status;
+      stage = 'http';
       if (!response.ok) throw new GraphError('graph_unavailable');
+      stage = 'json';
       const reply = await response.json() as { data?: unknown; errors?: unknown };
-      if (reply.errors || !reply.data) throw new GraphError('graph_query_failed');
+      stage = 'graphql';
+      if (Array.isArray(reply?.errors)) queryErrors = reply.errors.slice(0, 3).map(error =>
+        redact(typeof error?.message === 'string' ? error.message : 'Unspecified GraphQL error'));
+      if (reply?.errors || !reply?.data) throw new GraphError('graph_query_failed');
       return reply.data;
-    } catch { throw new GraphError('graph_unavailable'); }
+    } catch (error) {
+      const cause = error instanceof Error ? error.cause : undefined;
+      const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined;
+      console.error('Graph request failed', {
+        stage, status, elapsedMs: Date.now() - started,
+        timeout: error instanceof Error && error.name === 'TimeoutError',
+        networkCode: typeof code === 'string' && /^[A-Z_0-9]{1,50}$/.test(code) ? code : undefined,
+        queryErrors,
+      });
+      throw error instanceof GraphError ? error : new GraphError('graph_unavailable');
+    }
   }
   async candidates(market: Address): Promise<{ block: number; hash: Hex; candidates: Discovered[] }> {
     const data = z.object({ _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }), strategies: z.array(strategySchema).max(32) })

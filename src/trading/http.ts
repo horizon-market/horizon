@@ -23,6 +23,18 @@ const redeemSchema = z.object({ account: address, market: address, recipient: ad
 
 export const serialize = (value: unknown) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item));
 
+function logMarketFailure(error: unknown, operation: string) {
+  // Database/RPC error messages may contain credentials; report only diagnostic categories.
+  const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  console.error('Market request failed', {
+    operation,
+    kind: error instanceof GraphError ? 'graph' : error instanceof z.ZodError ? 'response_validation' : 'internal',
+    graphCode: error instanceof GraphError && /^graph_[a-z_]+$/.test(error.message) ? error.message : undefined,
+    code: typeof code === 'string' && /^(P\d{4}|[A-Z0-9]{5})$/.test(code) ? code : undefined,
+    validationIssues: error instanceof z.ZodError ? error.issues.map(issue => ({ code: issue.code, path: issue.path })) : undefined,
+  });
+}
+
 /** `service` is the wired MarketService, which knows whether a local mirror is available. */
 export function tradingRoutes(config?: TradingConfig, marketService?: MarketService, events?: EventService) {
   const router = Router();
@@ -42,8 +54,8 @@ export function tradingRoutes(config?: TradingConfig, marketService?: MarketServ
         res.status(status).json(serialize({ error: error.message, ...error.details }));
         return;
       }
+      logMarketFailure(error, 'market');
       if (error instanceof GraphError) { res.status(503).json({ error: 'graph_unavailable' }); return; }
-      console.error('Market request failed; internal details withheld');
       res.status(503).json({ error: 'market_data_unavailable' });
     });
 
@@ -62,7 +74,10 @@ export function tradingRoutes(config?: TradingConfig, marketService?: MarketServ
         ...list, sync, events: grouped,
         standalone: list.markets.filter(market => !inGroup.has(market.id.toLowerCase())).map(market => market.id),
       }));
-    } catch { res.status(503).json({ error: 'graph_unavailable' }); }
+    } catch (error) {
+      logMarketFailure(error, 'markets.list_or_sync_status');
+      res.status(503).json({ error: 'graph_unavailable' });
+    }
   });
   router.get('/markets/:market', reads, async (req, res) => {
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
