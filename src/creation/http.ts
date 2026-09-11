@@ -125,7 +125,12 @@ export function creationRoutes(service?: CreationService) {
     router.use((_req, res) => res.status(503).json({ error: 'creation_not_configured' }));
     return router;
   }
-  const view = (request: PublicRequest) => present(request, quantity => service.groupQuote(quantity));
+  // The audit block travels with the request it belongs to, so every screen that can already
+  // read a request can show its published trail without a second authorization path.
+  const view = (request: PublicRequest) => ({
+    ...present(request, quantity => service.groupQuote(quantity)),
+    audit: service.presentAudit(request.auditEvents ?? []),
+  });
   const drafting = rateLimit({ windowMs: 15 * 60_000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false });
   // A preview reaches an external API, so it gets its own, tighter budget than the other steps.
   const previews = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -225,6 +230,16 @@ export function creationRoutes(service?: CreationService) {
     const input = approvalSchema.safeParse(req.body);
     if (!input.success) { res.status(400).json({ error: 'invalid_approval' }); return; }
     try { res.json(serialize({ request: view(await service.approve(req.params.id!, bearer(req), input.data.draftHash)) })); }
+    catch (error) { fail(res, error); }
+  });
+
+  /**
+   * The published audit trail of one request. `?verify=1` reads each confirmed statement back
+   * from the mirror node and compares it with what this service holds, which is the check a
+   * third party can repeat against the same public URLs without trusting this API.
+   */
+  router.get('/requests/:id/audit', steps, async (req, res) => {
+    try { res.json(serialize({ audit: await service.auditTrail(req.params.id!, bearer(req), req.query.verify === '1') })); }
     catch (error) { fail(res, error); }
   });
 

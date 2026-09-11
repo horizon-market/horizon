@@ -81,6 +81,79 @@ Sepolia RPC and The Graph.
 The question was drafted from live indexed market data, reviewed and approved by a human before
 any charge, and the whole run is reproducible with `npm run agent:create`.
 
+## Public creation audit trail — Hedera Consensus Service
+
+Topic [`0.0.10473191`](https://hashscan.io/testnet/topic/0.0.10473191) on Hedera testnet, created
+September 11, 2026 in transaction `0.0.10424539@1789115559.545035814`. Its **submit key is the
+audit signer's public key**, so no other account can append to the trail; the mirror node reports
+`submit_key` and `admin_key` as `034b845654…97333c`, the on-ledger key of `0.0.10424539`. Memo:
+`Horizon market-creation audit trail. Schema horizon.audit.v1. Horizon's own statements.`
+
+**What this attests.** HCS records that Horizon made these statements and the order in which it
+made them. It does **not** verify the Hedera payment, the Sepolia deployment or any market
+outcome. The references inside each statement are what let a reader check those at their own
+sources, which is done below. Delivery is at least once — a reconciled resubmission can appear
+twice, and readers deduplicate by `eventId`.
+
+Thirteen statements are published, at topic sequence numbers 1–13, contiguous and in order. All
+thirteen were read back from the mirror node and matched the stored statement **byte for byte**.
+
+### One complete chain: request `b6414cd3-7110-4832-978b-8ccf1202ce00`
+
+| # | Statement | Consensus timestamp | Message |
+| --- | --- | --- | --- |
+| 1 | `DRAFT_APPROVED` | `1789115749.746207104` | [messages/6](https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/6) |
+| 2 | `PAYMENT_SETTLED` | `1789115752.870222104` | [messages/7](https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/7) |
+| 3 | `MARKET_CREATED` | `1789115756.085022104` | [messages/8](https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/8) |
+
+The three statements share one `draftHash` — `73b6e0d6…25b0fdf0`, the same canonical hash the human
+approved — and chain the approval to the payment and the payment to the market:
+
+```json
+{"schema":"horizon.audit.v1","type":"MARKET_CREATED","eventId":"e2a3220d…b2590e31",
+ "requestId":"b6414cd3-7110-4832-978b-8ccf1202ce00","occurredAt":"2026-09-10T09:28:37.847Z",
+ "draftHash":"73b6e0d6…25b0fdf0","backfilled":true,
+ "payment":{"transactionRef":"0.0.7162784@1789032315.551580133"},
+ "market":{"chainId":11155111,"address":"0x2CD0f62990c950528fdf27D78B06992B805BCab9",
+           "transactionHash":"0xc4fe069c…4ae7d78a"}}
+```
+
+**Each reference checked at its own source**, which is the point — HCS did not establish any of it:
+
+| Reference | Checked against | Result |
+| --- | --- | --- |
+| `0.0.7162784@1789032315.551580133` | Hedera mirror node | `SUCCESS`, 50000000 tinybar (0.5 HBAR, the verified-human price) transferred to the configured receiver |
+| `0x2CD0f629…805BCab9` | `MarketRegistry.isMarket` on Sepolia | `true` |
+| request id → market | `marketByCreationId(keccak256("horizon-creation:" + requestId))` | resolves to that market, so a retry cannot create a second one |
+| `0xc4fe069c…4ae7d78a` | Sepolia RPC receipt | status `0x1`, block 11674059, called against the registry |
+
+### Backfilled and live statements are distinguished
+
+Twelve of the thirteen are **backfilled** — recorded for requests that completed before the trail
+existed. Each carries `"backfilled": true` and an `occurredAt` holding the event time the service
+recorded; **their consensus timestamps are publication times, not event times**, and the API, the
+creation screen and `audit:verify` all say so on the row. Nothing presents them otherwise.
+
+The thirteenth is live. Request `50b78d10-f0b6-4aa3-8662-e9c2fab30e3e` was drafted and approved
+through the running service on September 11, 2026; the statement was written to the outbox in the
+approval transaction and published by the worker about ten seconds later:
+
+| Field | Value |
+| --- | --- |
+| Statement | `DRAFT_APPROVED`, `backfilled: false` |
+| Approved at | `2026-09-11T08:43:55.645Z` |
+| Consensus at | `2026-09-11T08:44:06.130Z` (`1789116246.130532104`) |
+| Hedera transaction | [`0.0.10424539@1789116237.208115829`](https://hashscan.io/testnet/transaction/0.0.10424539-1789116237-208115829) |
+| Message | [messages/13](https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/13) |
+
+Its draft was produced with the Graph-grounded duplicate context reported **unavailable**, because
+Graph Studio was returning HTTP 429 at the time and the API refuses to draft against an assumed
+empty market set. Everything else — the approval gate, the transactional outbox write, the worker,
+the topic — is the ordinary path.
+
+Recorded in [`deployments/audit-evidence.json`](../deployments/audit-evidence.json), and
+`npm run doctor` re-checks both the topic's submit key and the published statements.
+
 ## Disclosed centralized roles
 
 This MVP is deliberately centralized in two places, and both are stated in the product UI.
@@ -111,7 +184,7 @@ Verified on the current tree:
 | `npm run typecheck`, `npm run build`, `npm run web:typecheck`, `npm run web:build` | pass |
 | `npm run vendor:verify` | 329 pinned vendor files unchanged |
 | Subgraph `prepare`/`codegen`/`build` | pass |
-| `npm run doctor` | Sepolia, funding, Blocky402 capability, agent payment, Graph endpoint, indexed agent market, on-chain agent market and deployment wiring all `ok` |
+| `npm run doctor` | Sepolia, funding, Blocky402 capability, agent payment, Graph endpoint, indexed agent market, on-chain agent market, audit topic, published audit statements and deployment wiring all `ok` |
 
 ## Outstanding
 

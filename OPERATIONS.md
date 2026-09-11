@@ -134,6 +134,56 @@ without deploying, run the API with `EVM_DEPLOYER_PRIVATE_KEY` genuinely unset �
 `node --import tsx -e "import {loadConfig} from './src/config.js'; console.log(Boolean(loadConfig().creation?.privateKey))"`
 rather than assuming a filtered `.env` dropped it.
 
+### Public creation audit trail on HCS
+
+Statements about a creation request — the approved draft, the settled x402 payment, the deployed
+market — are written to an outbox in the same transaction as the workflow transition and published
+to a Hedera Consensus Service topic by the worker. **Publication is never on the paid path**: an
+unreachable topic delays the trail and cannot repeat a payment, repeat a deployment or fail a
+creation.
+
+Live since September 11, 2026 on topic `0.0.10473191` (Hedera testnet), whose submit key is the
+audit signer's. Thirteen statements are published at sequence numbers 1–13; see
+[docs/EVIDENCE.md](docs/EVIDENCE.md).
+
+```sh
+npm run db:migrate          # applies 202609110001_audit_events
+npm run db:test:migrate     # the same, against horizon_test
+npm run audit:topic -- --dry-run
+npm run audit:topic         # creates the topic; put the printed id in .env
+npm run audit:backfill -- --dry-run
+npm run audit:verify -- --latest --record
+```
+
+The migration is additive: no existing table or column changes, and a request with no rows in
+`AuditEvent` behaves exactly as it did before.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `HEDERA_AUDIT_ENABLED` | `true` | `false` records statements without publishing them. |
+| `HEDERA_AUDIT_TOPIC_ID` | empty | The topic. Without it the outbox accumulates and nothing is published. |
+| `HEDERA_AUDIT_ACCOUNT_ID`, `HEDERA_AUDIT_PRIVATE_KEY` | empty | The server-side audit signer. Its public key is the topic's submit key, so no other account can append. |
+| `HEDERA_AUDIT_KEY_TYPE` | `ecdsa` | How a bare 32-byte hex key is read. A DER encoding names its own curve and is detected. |
+| `HEDERA_MIRROR_NODE_URL` | testnet mirror | Used to reconcile unknown submissions and to verify published contents. |
+| `HEDERA_AUDIT_PUBLISH_INTERVAL_MS` | `20000` | How often the worker sweeps the outbox. |
+
+Notes for whoever runs it next:
+
+- **Delivery is at least once.** HCS orders and timestamps messages; it does not deduplicate
+  application event ids. A submission whose outcome was unknown is reconciled against the mirror
+  node first and only resubmitted if it cannot be found, so a duplicate is possible. Readers
+  deduplicate by `eventId`. Do not describe this as exactly-once.
+- **`UNCONFIRMED` is not a failure and not a success.** It means a submission was made and its
+  outcome is unknown. It is never shown as published and never given a consensus timestamp.
+- **Backfilled statements keep their event time in `occurredAt` only.** Their consensus timestamp
+  is the time of publication. The API and the creation screen say so on the row; never present one
+  as an original event-time timestamp.
+- **The audit signer is separate from the x402 payer and the Sepolia deployer.** In this
+  deployment the receiver account doubles as the signer; a production deployment should use a
+  third account so receiving a creation fee and attesting to it are not the same key.
+- The topic memo and the topic id are public. The signer's private key is not, and appears in no
+  log, no API response and no published statement.
+
 ### Void a market that should not exist
 
 A market created in error is voided by resolving it **INVALID** through the ordinary audited

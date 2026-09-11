@@ -9,8 +9,15 @@ import { CreationService, WorkflowError } from './creation/service.js';
 import { RegistryMarketDeployer } from './creation/onchain.js';
 import { AdminService, ChainResolutionSubmitter } from './admin/service.js';
 import { EventService } from './events/service.js';
+import { AuditService } from './audit/service.js';
+import { HcsAuditPublisher, MirrorNodeReader, UnconfiguredAuditPublisher } from './audit/hcs.js';
+import { AUDIT_DELIVERY_NOTE, AUDIT_DISCLOSURE, AUDIT_SCHEMA, AUDIT_TYPES } from './audit/events.js';
 
-export type QueueBindings = { enqueueCreation?: (requestId: string) => Promise<void>; enqueueResolution?: (resolutionId: string) => Promise<void> };
+export type QueueBindings = {
+  enqueueCreation?: (requestId: string) => Promise<void>;
+  enqueueResolution?: (resolutionId: string) => Promise<void>;
+  enqueueAudit?: (requestId: string) => Promise<void>;
+};
 
 /** One wiring point for the API process, the worker process and integration tests. */
 export function buildServices(config: Config, db: PrismaClient, queue: QueueBindings = {}) {
@@ -23,9 +30,16 @@ export function buildServices(config: Config, db: PrismaClient, queue: QueueBind
   const deployer = config.creation ? new RegistryMarketDeployer(config.creation) : undefined;
   const submitter = config.creation ? new ChainResolutionSubmitter(config.creation) : undefined;
   const events = new EventService(db);
+  // The trail is always recorded. Publication needs a topic and a signer; without them the outbox
+  // simply accumulates, which is what makes a later `audit:backfill` possible rather than lost.
+  const audit = new AuditService({
+    db, config: config.audit, enqueue: queue.enqueueAudit,
+    publisher: config.audit.enabled ? new HcsAuditPublisher(config.audit) : new UnconfiguredAuditPublisher(),
+    mirror: new MirrorNodeReader(config.audit.mirrorNodeUrl),
+  });
   const creation = new CreationService({
     db, provider, verifier, facilitator, payments: config.payments, world: config.world, deployer,
-    imports: config.imports, enqueue: queue.enqueueCreation,
+    imports: config.imports, enqueue: queue.enqueueCreation, audit, chainId: 11155111,
     closeBounds: { minSeconds: config.creation?.minCloseInSeconds ?? 3600, maxSeconds: config.creation?.maxCloseInSeconds ?? 365 * 24 * 3600 },
     // Drafting is grounded on live indexed markets; an indexer outage is reported, never assumed empty.
     context: async () => {
@@ -42,7 +56,7 @@ export function buildServices(config: Config, db: PrismaClient, queue: QueueBind
   const syncProjection = markets && config.marketSync.enabled
     ? () => syncMarkets(db, markets.graph, { pageSize: config.marketSync.pageSize })
     : undefined;
-  return { markets, creation, admin, events, provider, verifier, facilitator, deployer, submitter, projection, syncProjection };
+  return { markets, creation, admin, events, audit, provider, verifier, facilitator, deployer, submitter, projection, syncProjection };
 }
 
 export function publicConfig(config: Config, services: ReturnType<typeof buildServices>) {
@@ -71,6 +85,18 @@ export function publicConfig(config: Config, services: ReturnType<typeof buildSe
       groupConsistency: 'backend_only',
       groupConsistencyNote: 'An event marked as exclusive is checked in the resolution workflow: a second YES is refused while a sibling is resolved YES or queued to be. '
         + 'The market contracts know nothing about events, so this is not enforced on chain.' },
+    // The public audit trail. What it attests is stated where the application can read it, so no
+    // screen can present it as verification of the payment, the deployment or a market outcome.
+    audit: {
+      available: services.audit.publishing,
+      schema: AUDIT_SCHEMA, types: [...AUDIT_TYPES],
+      network: config.audit.network,
+      topicId: services.audit.publishing ? config.audit.topicId : null,
+      topicUrl: services.audit.publishing ? `${config.audit.explorerBase.replace(/\/$/, '')}/topic/${config.audit.topicId}` : null,
+      mirrorNodeUrl: config.audit.mirrorNodeUrl,
+      delivery: 'at_least_once', deliveryNote: AUDIT_DELIVERY_NOTE,
+      reason: config.audit.reason, note: AUDIT_DISCLOSURE,
+    },
     events: {
       // Grouping is service metadata. Every child is an independent binary market with its own
       // contracts, collateral and resolution; shared collateral and negative-risk conversion

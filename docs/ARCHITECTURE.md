@@ -166,6 +166,118 @@ The same resource serves browsers and agents: `POST /api/creation/requests/:id/p
   a transaction reference — parks the request in `PAYMENT_REVIEW`. It is never retried
   automatically; an operator reconciles it from the ledger and the recorded reference.
 
+## Public audit trail (Hedera Consensus Service)
+
+Three statements about a creation request are published to one HCS topic, giving a public,
+timestamped, ordered record that links an **approved draft** to the **Hedera payment that settled
+for it** and to the **Sepolia market it produced**.
+
+| Statement | Contents |
+| --- | --- |
+| `DRAFT_APPROVED` | request id, approved draft hash |
+| `PAYMENT_SETTLED` | the above, plus network, asset, amount in base units, settled transaction reference |
+| `MARKET_CREATED` | the above, plus the payment reference, EVM chain id, market address, confirmed deployment transaction hash |
+
+**What it attests, and what it does not.** HCS records *Horizon's own statements* and the order in
+which it made them. It does not independently verify the Hedera payment, the Sepolia deployment or
+the eventual outcome of a market. Each of those is checked at its own source — the Hedera mirror
+node, a Sepolia explorer, the market contract — and the references in the statements are what let
+anyone do that. This sentence is returned by `/api/config`, embedded in every request view, and
+printed on the creation screen, so no surface can imply a stronger guarantee.
+
+### The schema
+
+`horizon.audit.v1`, defined in `src/audit/events.ts`. Every message is validated against a
+**strict** closed schema immediately before submission and built from an explicit field list
+rather than spread from a database row, so a private key, an access token, a World proof, a
+credential identifier or a requester address cannot reach the topic even by mistake. The largest
+statement is well under the 1024-byte HCS message limit, and submission sets `maxChunks(1)` so a
+statement that outgrew it would be refused rather than silently split.
+
+Encoding is canonical: key order is fixed at encode time rather than inherited from the stored
+`jsonb`, so a message is a function of its fields alone and a mirror-node readback can be compared
+byte for byte.
+
+**Event id.** `sha256("horizon.audit.v1:" + requestId + ":" + type)`, and for a child of an event
+`+ ":" + position` — the same derivation idiom as the on-chain `creationId`. It is stable, it is
+carried inside the message, and it is the key readers deduplicate on.
+
+**Order.** A per-request `sequence` is derived from the type and position (`DRAFT_APPROVED` = 1,
+`PAYMENT_SETTLED` = 2, `MARKET_CREATED` = 3 + position), never counted. Counting rows would let
+two concurrent writers claim different places in the order and would turn a retried write into a
+new event.
+
+### Durability: an outbox, not a call
+
+Each statement is written to the `AuditEvent` table **inside the same database transaction as the
+workflow transition it records**. A request cannot be approved, a payment cannot be recorded as
+settled and a market cannot be recorded as created without its statement being queued, and the
+statement cannot exist without the transition. Publication happens afterwards, on the existing
+pg-boss infrastructure.
+
+The consequence is the point of the design: **Hedera being unreachable cannot cause a second
+payment, a second deployment, or a failed creation.** Nothing on the paid path waits for the
+topic, and a publication failure is recorded on the outbox row, never on the request.
+
+Two success statements are deliberately late: `PAYMENT_SETTLED` is written only with the
+settlement receipt in hand, and `MARKET_CREATED` only after the deployment receipt is confirmed
+and the registry names the market.
+
+### Publication, retries and unknown outcomes
+
+The worker publishes a request's open statements **in ascending sequence and stops at the first
+one it cannot confirm**, so a payment statement that has not landed can never be overtaken by the
+market statement that followed it. At most one publication job per request runs at a time
+(`singletonKey`), and a periodic sweep re-enqueues whatever is still due — which is what recovers
+a wake-up refused while a job was running, a worker restarted mid-publication, and any statement
+waiting out its exponential backoff.
+
+Four states are kept apart, and only one of them means published:
+
+- `PENDING` / `PUBLISHING` — queued, or claimed by a worker. No consensus timestamp.
+- `UNCONFIRMED` — **submitted, outcome unknown.** Never reported as published.
+- `PUBLISHED` — confirmed, with a Hedera transaction id, a consensus timestamp and a topic
+  sequence number, all stored.
+- `FAILED` — refused for a reason that will not change (`INVALID_TOPIC_ID`, `UNAUTHORIZED`,
+  an oversized message).
+
+**Delivery is at least once, and is never described otherwise.** HCS orders and timestamps
+messages; it does not deduplicate application event ids. An unknown outcome is therefore
+reconciled first — the mirror node is searched for the statement's event id, and a statement
+already on the topic is recorded with the consensus timestamp and sequence number it actually has
+rather than being sent again. Only when reconciliation cannot find it is it resubmitted, which can
+put a second copy on the topic. Readers deduplicate by `eventId`. A statement whose outcome is
+still unknown when its retry budget runs out is parked as `UNCONFIRMED` for an operator rather
+than being declared either way.
+
+### Backfilled statements
+
+`npm run audit:backfill` records statements for requests that completed before the trail existed.
+Every such row is marked `backfilled`, the published message carries `"backfilled": true`, and
+`occurredAt` carries the event time the service actually recorded. **A backfilled statement's
+consensus timestamp is the time Horizon published it, not the time the event happened**, and the
+API and the creation screen say exactly that on the row itself. Nothing represents a backfilled
+statement as having an original event-time consensus timestamp.
+
+### Reading and verifying it
+
+The trail travels with the request it belongs to: `GET /api/creation/requests/:id` includes an
+`audit` block, under the request's existing bearer-token authorization and disclosing only fields
+the request view already returns. `GET /api/creation/requests/:id/audit?verify=1` additionally
+reads each confirmed statement back from the mirror node and compares it byte for byte, which is
+the check a third party can repeat against the same public URLs without trusting the API at all.
+`npm run audit:verify` does the same from the command line, and `npm run doctor` re-checks that the
+topic accepts messages only from the configured audit signer.
+
+### Configuration
+
+`HEDERA_AUDIT_TOPIC_ID`, `HEDERA_AUDIT_ACCOUNT_ID` and `HEDERA_AUDIT_PRIVATE_KEY` configure a
+server-side audit signer whose public key is the topic's **submit key**, so no other account can
+append to the trail. The key stays in the API/worker process; it is never logged, never returned
+by an API and never written into a statement. `npm run audit:topic` creates such a topic. Without
+these settings the outbox still records every statement — it simply publishes nothing, and says so
+rather than presenting an empty trail as a complete one.
+
 ## World verification
 
 Verification is an eligibility and abuse-resistance signal, not proof of forecasting skill, and an

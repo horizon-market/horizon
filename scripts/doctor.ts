@@ -15,6 +15,13 @@ const report = (name: string, status: Check['status'], detail: string) => checks
 let phase3Evidence: Phase3Evidence | undefined;
 try { phase3Evidence = JSON.parse(await readFile('deployments/phase3-agent-evidence.json', 'utf8')) as Phase3Evidence; }
 catch { /* A fresh checkout has no live Phase 3 evidence yet. */ }
+type AuditEvidence = {
+  network: string; topicId: string; requestId: string;
+  events: { sequence: number; type: string; eventId: string; status: string; sequenceNumber: string | null; mirrorMatches: boolean }[];
+};
+let auditEvidence: AuditEvidence | undefined;
+try { auditEvidence = JSON.parse(await readFile('deployments/audit-evidence.json', 'utf8')) as AuditEvidence; }
+catch { /* No audit statement has been published and recorded yet. */ }
 
 async function json(url: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
@@ -112,6 +119,47 @@ if (phase3Evidence?.creation.market && env.HORIZON_REGISTRY_ADDRESS && env.EVM_R
   if (`0x${resolver.slice(-40)}`.toLowerCase() !== env.EVM_DEPLOYER_ADDRESS?.toLowerCase()) throw new Error('Unexpected resolver');
   return 'The paid agent request produced a registered market whose creation id derives from its request id, resolved by the disclosed Horizon resolver.';
 });
+
+// --- Public audit trail (Hedera Consensus Service) --------------------------
+// Read-only against the mirror node. It never submits a statement and never prints a key.
+const mirrorNode = env.HEDERA_MIRROR_NODE_URL || 'https://testnet.mirrornode.hedera.com';
+const auditTopic = env.HEDERA_AUDIT_TOPIC_ID;
+if (auditTopic && env.HEDERA_AUDIT_ACCOUNT_ID) {
+  await check('Audit topic restricted to the audit signer', async () => {
+    const topic = z.object({ topic_id: z.string(), memo: z.string().optional(), deleted: z.boolean().nullable().optional(),
+      submit_key: z.object({ _type: z.string(), key: z.string() }).nullable().optional() })
+      .parse(await json(`${mirrorNode.replace(/\/$/, '')}/api/v1/topics/${auditTopic}`));
+    if (topic.deleted) throw new Error('Topic deleted');
+    if (!topic.submit_key?.key) throw new Error('Topic accepts messages from any account');
+    const { PrivateKey } = await import('@hiero-ledger/sdk');
+    const raw = env.HEDERA_AUDIT_PRIVATE_KEY;
+    if (raw) {
+      // Only the derived public key is compared; the private key is never printed or stored.
+      const value = raw.trim().replace(/^0x/, '');
+      const key = env.HEDERA_AUDIT_KEY_TYPE === 'der' || (value.length > 64 && value.startsWith('30'))
+        ? PrivateKey.fromStringDer(value)
+        : env.HEDERA_AUDIT_KEY_TYPE === 'ed25519' ? PrivateKey.fromStringED25519(value) : PrivateKey.fromStringECDSA(value);
+      if (!topic.submit_key.key.toLowerCase().includes(key.publicKey.toStringRaw().toLowerCase())) throw new Error('Submit key is not the configured audit signer');
+    }
+    return `Topic ${auditTopic} on Hedera ${env.HEDERA_AUDIT_NETWORK || 'testnet'} exists and accepts messages only from the configured audit signer${raw ? ', whose public key matches its submit key' : ''}.`;
+  });
+} else report('Audit topic', 'pending', 'Run npm run audit:topic and set HEDERA_AUDIT_TOPIC_ID, HEDERA_AUDIT_ACCOUNT_ID and HEDERA_AUDIT_PRIVATE_KEY.');
+
+if (auditEvidence && auditEvidence.topicId) await check('Published audit statements', async () => {
+  let matched = 0;
+  for (const event of auditEvidence!.events) {
+    if (event.status !== 'PUBLISHED' || !event.sequenceNumber) throw new Error('Recorded statement was never published');
+    const message = z.object({ consensus_timestamp: z.string(), message: z.string(), sequence_number: z.number() })
+      .parse(await json(`${mirrorNode.replace(/\/$/, '')}/api/v1/topics/${auditEvidence!.topicId}/messages/${event.sequenceNumber}`));
+    const contents = Buffer.from(message.message, 'base64').toString('utf8');
+    // The recorded event id must be the one actually on the topic at that sequence number.
+    if (!contents.includes(event.eventId) || !contents.includes(auditEvidence!.requestId)) throw new Error('Mirror message does not match the recorded statement');
+    matched++;
+  }
+  return `${matched} statement${matched === 1 ? '' : 's'} for request ${auditEvidence!.requestId} read back from the Hedera mirror node at their recorded sequence numbers. `
+    + 'HCS attests Horizon\'s statements and their ordering only, not the referenced payment, deployment or outcome.';
+});
+else report('Published audit statements', 'pending', 'Publish a creation request\'s trail and record it with npm run audit:verify -- --latest --record.');
 
 const worldFields = ['WORLD_APP_ID', 'WORLD_RP_ID', 'WORLD_RP_SIGNING_KEY', 'WORLD_ACTION'] as const;
 const missingWorld = worldFields.filter(key => !env[key]);

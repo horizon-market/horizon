@@ -6,14 +6,17 @@ export const PROBE_QUEUE = 'system.probe';
 export const CREATION_QUEUE = 'creation.market';
 export const RESOLUTION_QUEUE = 'market.resolution';
 export const MARKET_SYNC_QUEUE = 'market.sync';
+export const AUDIT_QUEUE = 'audit.publish';
 export const probeSchema = z.object({ probeId: z.string().uuid(), label: z.string().min(1).max(120) });
 export const creationJobSchema = z.object({ requestId: z.string().uuid() });
 export const resolutionJobSchema = z.object({ resolutionId: z.string().uuid() });
 export const marketSyncJobSchema = z.object({ reason: z.string().min(1).max(60) });
+export const auditJobSchema = z.object({ requestId: z.string().uuid() });
 export type ProbeData = z.infer<typeof probeSchema>;
 export type CreationJobData = z.infer<typeof creationJobSchema>;
 export type ResolutionJobData = z.infer<typeof resolutionJobSchema>;
 export type MarketSyncJobData = z.infer<typeof marketSyncJobSchema>;
+export type AuditJobData = z.infer<typeof auditJobSchema>;
 
 // JobRun is keyed by business id; the mirror has one, and this is its stable name.
 const MARKET_SYNC_UUID = '00000000-0000-4000-8000-00000000d001';
@@ -30,6 +33,10 @@ export async function startQueue(connectionString: string): Promise<PgBoss> {
   // A missed sweep is corrected by the next tick, so a stuck retry chain would only delay the
   // mirror and waste Graph quota. Fail fast and let the ticker drive recovery.
   await boss.createQueue(MARKET_SYNC_QUEUE, { name: MARKET_SYNC_QUEUE, retryLimit: 1, retryDelay: 5, expireInSeconds: 120 });
+  // Publication retries live in the outbox, which records attempts, backoff and the reason a
+  // statement is still open. A queue-level retry chain on top of that would only submit the same
+  // statement again sooner, so the job runs once and the sweep is what brings it back.
+  await boss.createQueue(AUDIT_QUEUE, { name: AUDIT_QUEUE, retryLimit: 0, expireInSeconds: 180 });
   return boss;
 }
 
@@ -55,6 +62,15 @@ export async function enqueueMarketSync(boss: PgBoss, reason: string): Promise<v
   await boss.send(MARKET_SYNC_QUEUE, marketSyncJobSchema.parse({ reason }), { singletonKey: MARKET_SYNC_QUEUE, retryLimit: 1, expireInSeconds: 120 });
 }
 
+/**
+ * At most one publication job per request at a time, which is what keeps a request's statements
+ * in order: two workers never publish the same request concurrently. A wake-up that is refused
+ * because one is already running is not lost — the sweep re-enqueues whatever is still due.
+ */
+export async function enqueueAuditPublish(boss: PgBoss, requestId: string): Promise<void> {
+  await boss.send(AUDIT_QUEUE, auditJobSchema.parse({ requestId }), { singletonKey: requestId, retryLimit: 0, expireInSeconds: 180 });
+}
+
 export async function recordProbe(db: PrismaClient, queueJobId: string, input: unknown): Promise<void> {
   const data = probeSchema.parse(input);
   // The business identifier survives retries, duplicate deliveries and process restarts.
@@ -76,6 +92,7 @@ export async function recordRun(db: PrismaClient, id: string, queueJobId: string
 
 export type JobHandlers = {
   createMarket?: (requestId: string) => Promise<{ status: string }>;
+  publishAudit?: (requestId: string) => Promise<{ status: string; published: number }>;
   resolveMarket?: (resolutionId: string) => Promise<{ status: string }>;
   syncMarkets?: (reason: string) => Promise<{ status: string; markets: number }>;
 };
@@ -109,6 +126,21 @@ export async function registerWorker(boss: PgBoss, db: PrismaClient, handlers: J
       } catch {
         await recordRun(db, MARKET_SYNC_UUID, job.id, 'sync:FAILED');
       }
+    }
+  });
+  // The audit trail is a record of what already happened. A failure to publish it must never
+  // fail a job whose success would otherwise be repeated, so nothing here is rethrown: the outbox
+  // holds the state and the sweep retries with its own backoff.
+  await boss.work<AuditJobData>(AUDIT_QUEUE, { pollingIntervalSeconds: 2, batchSize: 1 }, async jobs => {
+    for (const job of jobs) {
+      const { requestId } = auditJobSchema.parse(job.data);
+      if (!handlers.publishAudit) return;
+      try {
+        const report = await handlers.publishAudit(requestId);
+        // Worth a line: it names what is still open and why a request is not finished, which is
+        // the only place an operator can see a topic problem without querying the outbox.
+        if (report.status !== 'idle') console.log(`audit.publish ${requestId}: ${report.status}, ${report.published} published`);
+      } catch { console.error('Audit publication attempt failed; the statement stays in the outbox'); }
     }
   });
   await boss.work<ResolutionJobData>(RESOLUTION_QUEUE, { pollingIntervalSeconds: 2 }, async jobs => {

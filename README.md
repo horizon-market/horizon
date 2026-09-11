@@ -36,6 +36,11 @@ x402, and halved for a verified human.
   over [Hedera](https://hedera.com) x402 and is resumable — a retried request never charges twice
   and never creates two markets. A verified [World](https://world.org) credential reduces the
   charge, at most once per credential per day.
+- **A publicly verifiable creation history.** Every approved draft, settled payment and deployed
+  market is stated on a [Hedera](https://hedera.com) Consensus Service topic, in order, with a
+  consensus timestamp anyone can read back from a mirror node. HCS records Horizon's statements and
+  their ordering — it does not verify the payment, the deployment or any market outcome, and the
+  product says so wherever the trail appears.
 - **Events and imported definitions.** Several binary markets can be grouped under one title, one
   review and one payment, optionally imported from a Polymarket page. Imports copy **definitions
   only** — question, outcome labels, resolution criteria, evidence source and dates. Source
@@ -62,6 +67,7 @@ flowchart LR
   U -->|"signed transactions"| C["Contracts · Sepolia"]
   A -->|"GraphQL"| G["Subgraph · The Graph"]
   A -->|"x402 payment"| H["Hedera testnet · Blocky402"]
+  W -->|"audit statements"| T["HCS topic · Hedera testnet"]
   A -->|"durable jobs"| W["Worker · pg-boss"]
   W -->|"createMarket, resolve"| C
   C -->|"events"| G
@@ -73,7 +79,7 @@ flowchart LR
 | --- | --- |
 | Contracts | Solidity, Foundry, extending pinned official 1inch Aqua/SwapVM sources |
 | API | Node 24, TypeScript, Express, Prisma, AdminJS for record inspection |
-| Worker | A separate process on pg-boss: market creation, resolution and mirror sweeps |
+| Worker | A separate process on pg-boss: market creation, resolution, mirror sweeps and audit publication |
 | Frontend | React 19, Vite, viem/wagmi, Hedera WalletConnect for payments |
 | Indexing | A Subgraph deployed to The Graph Studio |
 | Data | PostgreSQL 18 for requests, payments, sessions, jobs and the market mirror |
@@ -144,13 +150,18 @@ Ethereum Sepolia (chain `11155111`), recorded in [deployments/sepolia.json](depl
 | 1inch Aqua | `0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a` |
 | Test USDC | `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` |
 
+Audit trail: HCS topic [`0.0.10473191`](https://hashscan.io/testnet/topic/0.0.10473191) on Hedera
+testnet, restricted to the audit signer's submit key.
+
 Indexer: `https://api.studio.thegraph.com/query/1758973/horizon/0.3.1`.
 Transactions, block numbers and live re-checks are listed in [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ## Status
 
-Demonstrated on public networks: an atomic two-curve route on Sepolia and its indexed result, and
-an agent-owned client completing a paid creation end to end — 1 HBAR settled on Hedera testnet,
+Demonstrated on public networks: an atomic two-curve route on Sepolia and its indexed result, a
+public audit trail of thirteen statements on a Hedera Consensus Service topic — each read back
+from the mirror node byte for byte, with the payment and market they reference verified at their
+own sources — and an agent-owned client completing a paid creation end to end — 1 HBAR settled on Hedera testnet,
 the market created on Sepolia under a creation id derived from its request id, and indexed by The
 Graph. The frontend covers browsing, a market detail and order ticket, curve publishing, holdings
 and redemption, the creation workflow and an operator screen.
@@ -181,7 +192,7 @@ any mainnet deployment.
 
 - [docs/SETUP.md](docs/SETUP.md) — requirements, first run, configuration, verification.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — processes, trust boundaries, curve trading,
-  order budgets, the creation workflow and the x402 payment flow.
+  order budgets, the creation workflow, the x402 payment flow and the HCS audit trail.
 - [docs/EVIDENCE.md](docs/EVIDENCE.md) — verified addresses and transactions, disclosed roles,
   check results and what remains outstanding.
 - [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) — the interface language of the application.

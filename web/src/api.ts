@@ -21,6 +21,12 @@ export type AppConfig = {
     available: boolean; sharedCollateral: boolean; negativeRiskConversion: boolean;
     imports: { available: boolean; providers: string[]; maxChildren: number; policy: string; note: string };
   };
+  /** The public Hedera Consensus Service audit trail, and exactly what it does and does not attest. */
+  audit: {
+    available: boolean; schema: string; types: string[]; network: string;
+    topicId: string | null; topicUrl: string | null; mirrorNodeUrl: string;
+    delivery: string; deliveryNote: string; reason: string; note: string;
+  };
   ai: { provider: string; mode: 'live' | 'development' };
   world: { available: boolean; widgetAvailable: boolean; access: string; reason: string; action: string; appId: string; rpId: string; environment: 'sandbox' | 'staging' | 'production' };
   resolution: { centralized: boolean; disclosed: boolean; resolver: string | null; invalidPayout: string; note: string;
@@ -182,6 +188,26 @@ export type ImportPreviewResult = {
 };
 export type ImportRejection = { error: string; preview?: ImportPreview; existing?: ExistingImport; source?: ImportPreviewResult['source'] };
 
+/**
+ * One published statement in a request's public audit trail. `consensusAt` is null until the
+ * statement actually reaches consensus, and a backfilled statement's consensus timestamp is the
+ * time Horizon published it rather than the time the event happened.
+ */
+export type AuditEventView = {
+  eventId: string; type: string; sequence: number;
+  status: 'PENDING' | 'PUBLISHING' | 'UNCONFIRMED' | 'PUBLISHED' | 'FAILED' | string;
+  attempts: number; occurredAt: string; consensusAt: string | null;
+  transactionId: string | null; sequenceNumber: string | null; failureCode: string | null;
+  backfilled: boolean; timestampNote: string | null; payload: unknown;
+  topicUrl: string | null; transactionUrl: string | null; mirrorUrl: string | null;
+};
+export type AuditTrail = {
+  available: boolean; schema: string; network: string; topicId: string | null; topicUrl: string | null;
+  mirrorNodeUrl: string; types: string[]; delivery: string; deliveryNote: string; note: string;
+  events: AuditEventView[];
+  verification?: { eventId: string; checked: boolean; matches: boolean; reason?: string | null; url?: string }[];
+};
+
 export type CreationRequest = {
   id: string; status: string; question: string; requesterKind: string; requester: string;
   draft: MarketDraft | Record<string, unknown> | null;
@@ -208,6 +234,7 @@ export type CreationRequest = {
   createdAt: string; updatedAt: string;
   verification: { credentialType: string; verifier: string; verifiedAt: string } | null;
   payment: { status: string; network: string; asset: string; amountUnits: string; payTo: string; facilitator: string; transactionRef: string | null; payer: string | null; settledAt: string | null; failureCode: string | null; attempts: number } | null;
+  audit?: AuditTrail;
   fees: Fees;
 };
 /** One row of a requester's own creation history; the full request still needs its access token. */
@@ -304,6 +331,9 @@ export const api = {
   selectChildren: (id: string, token: string, positions: number[]) =>
     post<{ request: CreationRequest }>(`/api/creation/requests/${id}/selection`, { positions }, { authorization: `Bearer ${token}` }),
   getRequest: (id: string, token: string) => request<{ request: CreationRequest }>(`/api/creation/requests/${id}`, { headers: { authorization: `Bearer ${token}` } }),
+  /** `verify` reads each confirmed statement back from the Hedera mirror node before answering. */
+  getAudit: (id: string, token: string, verify = false) => request<{ audit: AuditTrail }>(
+    `/api/creation/requests/${id}/audit${verify ? '?verify=1' : ''}`, { headers: { authorization: `Bearer ${token}` } }),
   myCreations: (requester: string) => request<{ requests: CreationSummary[] }>(`/api/creation/requests?requester=${encodeURIComponent(requester)}`),
   abandon: (id: string, token: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/abandonment`, {}, { authorization: `Bearer ${token}` }),
   approve: (id: string, token: string, draftHash: string) => post<{ request: CreationRequest }>(`/api/creation/requests/${id}/approval`, { draftHash }, { authorization: `Bearer ${token}` }),

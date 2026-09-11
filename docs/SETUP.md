@@ -44,10 +44,28 @@ set `WEB_ORIGIN` to that origin so credentialed cross-origin requests are accept
 | `WORLD_SELFIE_ACCESS` | `unknown`/`requested`/`granted`. Only `granted` attempts a live verification; anything else reports the unavailable state and applies no discount. |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY` | With a credential, drafting calls the model provider. Without one, a deterministic provider runs, still grounded on live indexed markets. |
 | `EVM_DEPLOYER_PRIVATE_KEY` | Registry owner and disclosed resolver. Used only by the API/worker; it never reaches a browser. |
+| `HEDERA_AUDIT_TOPIC_ID`, `HEDERA_AUDIT_ACCOUNT_ID`, `HEDERA_AUDIT_PRIVATE_KEY` | The public creation audit trail on HCS. With all three, statements are published to the topic; without them they are still recorded and can be published later. The signer's key is the topic's submit key and stays server-side. |
 
 Secrets live in `.env` and `.local/`, both git-ignored. No user wallet key is ever sent to the
 server: browser trades and curve publications are signed in the user's own wallet, and the Hedera
 payment is signed by the payer's wallet or agent.
+
+### The public audit trail
+
+The trail is recorded from the first run and needs no configuration. To publish it, create a topic
+restricted to a server-side audit signer, then point the app at it:
+
+```sh
+npm run audit:topic -- --dry-run    # reports the signer and submit key; sends nothing
+npm run audit:topic                 # creates the topic, prints its id, spends a little testnet HBAR
+# put the printed id in .env as HEDERA_AUDIT_TOPIC_ID, then restart the API and the worker
+npm run audit:backfill -- --dry-run # statements for requests that completed before the trail existed
+npm run audit:verify -- --latest    # read the published statements back from the mirror node
+```
+
+The audit signer is configured separately from the x402 payer and the Sepolia deployer. Its public
+key becomes the topic's submit key, so only this service can append a statement. The key lives in
+`.env` and is never logged, never returned by an API and never written into a published statement.
 
 ## Verification
 
@@ -75,6 +93,7 @@ npm run subgraph:deploy
 npm run demo:seed                      # fund a demo maker and publish curves
 npm run agent:create -- --question "Will …?"          # agent x402 creation, review step
 npm run agent:create -- --resume --approve            # pays and creates after human review
+npm run audit:topic                                  # creates the HCS audit topic
 ```
 
 `agent:create` prints the exact draft and exits with code 2 until `--approve` is passed, so an

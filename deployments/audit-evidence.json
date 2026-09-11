@@ -1,0 +1,92 @@
+{
+  "network": "testnet",
+  "topicId": "0.0.10473191",
+  "mirrorNodeUrl": "https://testnet.mirrornode.hedera.com",
+  "explorerTopicUrl": "https://hashscan.io/testnet/topic/0.0.10473191",
+  "requestId": "b6414cd3-7110-4832-978b-8ccf1202ce00",
+  "verifiedAt": "2026-09-11T08:41:27.621Z",
+  "delivery": "at_least_once",
+  "note": "HCS records Horizon's own statements and their ordering. It does not verify the referenced Hedera payment, the Sepolia deployment or any market outcome.",
+  "events": [
+    {
+      "sequence": 1,
+      "type": "DRAFT_APPROVED",
+      "eventId": "019a4ad8cd85d21ce599d3300de0fd6dcc111691bbb188c728ef3053ce2fc29a",
+      "status": "PUBLISHED",
+      "backfilled": true,
+      "occurredAt": "2026-09-10T08:54:53.449Z",
+      "transactionId": "0.0.10424539@1789115744.375941537",
+      "consensusTimestamp": "1789115749.746207104",
+      "sequenceNumber": "6",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/6",
+      "mirrorMatches": true,
+      "payload": {
+        "type": "DRAFT_APPROVED",
+        "schema": "horizon.audit.v1",
+        "eventId": "019a4ad8cd85d21ce599d3300de0fd6dcc111691bbb188c728ef3053ce2fc29a",
+        "draftHash": "73b6e0d66b309c869d88e41388b1d01b5efe0fa67d6db32150d4bef425b0fdf0",
+        "requestId": "b6414cd3-7110-4832-978b-8ccf1202ce00",
+        "backfilled": true,
+        "occurredAt": "2026-09-10T08:54:53.449Z"
+      }
+    },
+    {
+      "sequence": 2,
+      "type": "PAYMENT_SETTLED",
+      "eventId": "f0a4a6acd45254695894e2ba857560e6f0aad1115d29216410b6460c2e8dd220",
+      "status": "PUBLISHED",
+      "backfilled": true,
+      "occurredAt": "2026-09-10T09:25:43.544Z",
+      "transactionId": "0.0.10424539@1789115743.894012585",
+      "consensusTimestamp": "1789115752.870222104",
+      "sequenceNumber": "7",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/7",
+      "mirrorMatches": true,
+      "payload": {
+        "type": "PAYMENT_SETTLED",
+        "schema": "horizon.audit.v1",
+        "eventId": "f0a4a6acd45254695894e2ba857560e6f0aad1115d29216410b6460c2e8dd220",
+        "payment": {
+          "asset": "0.0.0",
+          "network": "hedera:testnet",
+          "amountUnits": "50000000",
+          "transactionRef": "0.0.7162784@1789032315.551580133"
+        },
+        "draftHash": "73b6e0d66b309c869d88e41388b1d01b5efe0fa67d6db32150d4bef425b0fdf0",
+        "requestId": "b6414cd3-7110-4832-978b-8ccf1202ce00",
+        "backfilled": true,
+        "occurredAt": "2026-09-10T09:25:43.544Z"
+      }
+    },
+    {
+      "sequence": 3,
+      "type": "MARKET_CREATED",
+      "eventId": "e2a3220df2c0afef4344a8896aa721a09131c7e2eb25389cd029ea27b2590e31",
+      "status": "PUBLISHED",
+      "backfilled": true,
+      "occurredAt": "2026-09-10T09:28:37.847Z",
+      "transactionId": "0.0.10424539@1789115747.197092873",
+      "consensusTimestamp": "1789115756.085022104",
+      "sequenceNumber": "8",
+      "mirrorUrl": "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.10473191/messages/8",
+      "mirrorMatches": true,
+      "payload": {
+        "type": "MARKET_CREATED",
+        "market": {
+          "address": "0x2CD0f62990c950528fdf27D78B06992B805BCab9",
+          "chainId": 11155111,
+          "transactionHash": "0xc4fe069cfb41fed031926905c6ef74cd625e29ec13fac6efaf01c41b4ae7d78a"
+        },
+        "schema": "horizon.audit.v1",
+        "eventId": "e2a3220df2c0afef4344a8896aa721a09131c7e2eb25389cd029ea27b2590e31",
+        "payment": {
+          "transactionRef": "0.0.7162784@1789032315.551580133"
+        },
+        "draftHash": "73b6e0d66b309c869d88e41388b1d01b5efe0fa67d6db32150d4bef425b0fdf0",
+        "requestId": "b6414cd3-7110-4832-978b-8ccf1202ce00",
+        "backfilled": true,
+        "occurredAt": "2026-09-10T09:28:37.847Z"
+      }
+    }
+  ]
+}

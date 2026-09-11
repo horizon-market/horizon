@@ -76,6 +76,8 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
     resources: [
       ...['CreationRequest', 'CreationChild', 'PaymentIntent', 'HumanVerification', 'DiscountUsage', 'MarketResolution', 'AdminAudit', 'JobRun']
         .map(name => [name, 'Operations'] as const),
+      // The public audit outbox: what has been published to the topic, what is still open, and why.
+      ...['AuditEvent'].map(name => [name, 'Public audit trail'] as const),
       // Grouping metadata. Kept apart from the market mirror below: an event is Horizon's own
       // record, while the mirror is a projection of chain state.
       ...['MarketEvent', 'EventMarket'].map(name => [name, 'Events'] as const),

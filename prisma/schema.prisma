@@ -46,6 +46,7 @@ model CreationRequest {
   payment      PaymentIntent?
   verification HumanVerification?
   children     CreationChild[]
+  auditEvents  AuditEvent[]
 
   @@index([status, createdAt])
   // A requester reads back their own creation history; the portfolio lists it newest first.
@@ -256,6 +257,63 @@ model AdminSession {
 
   @@index([expire], map: "AdminSession_expire_idx")
   @@ignore
+}
+
+// ---------------------------------------------------------------------------
+// Public audit trail (Hedera Consensus Service).
+//
+// A durable outbox. Every row is written in the same database transaction as the
+// workflow transition it records, so a request can never advance without its
+// statement being queued, and an unreachable topic can never repeat a payment,
+// repeat a deployment or fail a user's creation. Publication is a background job.
+//
+// What HCS provides is a public, ordered, timestamped record of *Horizon's own
+// statements* and the order in which it made them. It does not verify the Hedera
+// payment, the Sepolia deployment or a market's outcome; each of those stays
+// verifiable at its own source, and the references below are what link them.
+// ---------------------------------------------------------------------------
+model AuditEvent {
+  id            String          @id @default(uuid()) @db.Uuid
+  requestId     String          @db.Uuid
+  request       CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  // sha256 over the schema id, the request id, the event type and — for a child of an event —
+  // its position. Derived, stable, and the key readers deduplicate on: HCS orders and timestamps
+  // messages, it does not deduplicate them, so a reconciled resubmission can appear twice.
+  eventId       String          @unique
+  type          String
+  schemaVersion String
+  // Publication order within one request. Fixed by type and position rather than counted, so the
+  // outbox write is idempotent and two attempts can never claim different places in the order.
+  sequence      Int
+  // The exact statement, as public fields only. Re-encoded canonically before every submission,
+  // so the bytes on the topic are a function of this row and not of jsonb key ordering.
+  payload       Json
+  // When the recorded fact happened, as this service observed it. Never the consensus timestamp.
+  occurredAt    DateTime
+  // True when the row was written after the fact rather than by the transition itself. Its
+  // consensus timestamp is then the time of publication and says nothing about the event time.
+  backfilled    Boolean         @default(false)
+  // PENDING | PUBLISHING | UNCONFIRMED | PUBLISHED | FAILED. UNCONFIRMED is deliberate: the
+  // submission's outcome is unknown, and it is reconciled against the mirror node before any
+  // resubmission. Nothing is reported as published without a consensus timestamp.
+  status        String          @default("PENDING")
+  network       String?
+  topicId       String?
+  // Hedera transaction id, consensus timestamp and topic sequence number of the confirmed
+  // message. All three stay null until the mirror-verifiable record exists.
+  transactionId String?
+  consensusAt   DateTime?
+  // The topic's own sequence number, a decimal string like every other unbounded integer here.
+  sequenceNumber String?
+  attempts      Int             @default(0)
+  nextAttemptAt DateTime?
+  failureCode   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([requestId, sequence])
+  @@index([status, nextAttemptAt])
+  @@index([requestId, sequence])
 }
 
 // ---------------------------------------------------------------------------

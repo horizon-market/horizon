@@ -11,6 +11,8 @@ import { normalizeEvent, outcomesComplete, slugify, snapshotMarket, type Normali
 import { buildRequirements, decodePayment, paymentMatches, paymentNonce, payloadFingerprint, PaymentPayloadError, PaymentRejectedError, SettlementAmbiguousError, type PaymentFacilitator } from '../payments/x402.js';
 import { createRpContext, proofSchema, VerificationRejectedError, VerificationUnavailableError, type HumanVerifier, type VerificationProof } from '../world/verifier.js';
 import type { MarketDeployer } from './onchain.js';
+import type { AuditService } from '../audit/service.js';
+import { draftApproved, marketCreated, paymentSettled } from '../audit/events.js';
 
 export const STATUSES = ['DRAFT', 'APPROVED', 'PAYMENT_REQUIRED', 'PAYMENT_REVIEW', 'PAID', 'CREATING', 'CREATED', 'FAILED', 'ABANDONED'] as const;
 export type Status = typeof STATUSES[number];
@@ -55,6 +57,14 @@ export type CreationDependencies = {
   imports?: ImportsConfig;
   /** Injectable so the import path is testable without reaching Polymarket. */
   gamma?: GammaClient;
+  /**
+   * The public audit trail. Statements are written to its outbox inside the same transaction as
+   * the transition they record, and published asynchronously, so nothing on this path waits for
+   * Hedera and nothing on it can be repeated because Hedera was unavailable.
+   */
+  audit?: AuditService;
+  /** The EVM chain a created market is deployed to; published with the market reference. */
+  chainId?: number;
 };
 
 export type Requester = { requesterKind: 'browser' | 'agent'; requester: string };
@@ -71,6 +81,8 @@ const REQUEST_INCLUDE = {
   payment: true, verification: true,
   children: { orderBy: { position: 'asc' } },
   event: { include: { members: { orderBy: { position: 'asc' } } } },
+  // The public audit trail of this request, in publication order.
+  auditEvents: { orderBy: { sequence: 'asc' } },
 } as const;
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
@@ -474,6 +486,26 @@ export class CreationService {
   async get(id: string, token: string | undefined) { return this.load(id, token); }
 
   /**
+   * The public audit trail of one request, optionally read back from the mirror node.
+   *
+   * Authorization is the request's own bearer token, unchanged: the trail says nothing a
+   * requester cannot already see on their request, and it discloses no field that `present`
+   * does not already return.
+   */
+  async auditTrail(id: string, token: string | undefined, verify = false) {
+    const request = await this.load(id, token);
+    if (!this.deps.audit) throw new WorkflowError('audit_not_configured', 503);
+    const events = request.auditEvents ?? [];
+    const view = this.deps.audit.present(events);
+    return verify ? { ...view, verification: await this.deps.audit.verify(events) } : view;
+  }
+
+  /** The trail as it is embedded in every request view. */
+  presentAudit(events: Parameters<AuditService['present']>[0]) {
+    return this.deps.audit?.present(events);
+  }
+
+  /**
    * The requester walks away from their own request, which is what frees them to draft another.
    * `transition` is the gate: `abandon` is declared on no status where a payment has settled or is
    * in flight, so a paid request can never be discarded and its money can never be stranded. The
@@ -546,21 +578,35 @@ export class CreationService {
       // Durable membership now matches what will actually be created; a deselected child is not
       // part of the event, so browsing never lists an outcome nobody can trade.
       const keep = new Set(selected.map(child => child.position));
-      return this.deps.db.$transaction(async tx => {
+      const updated = await this.deps.db.$transaction(async tx => {
         if (request.eventId) {
           await tx.eventMarket.deleteMany({ where: { eventId: request.eventId, marketAddress: null, position: { notIn: [...keep] } } });
         }
-        return tx.creationRequest.update({
-          where: { id, status: request.status }, data: { status, approvedAt: new Date(), approvedHash },
+        const approvedAt = new Date();
+        const row = await tx.creationRequest.update({
+          where: { id, status: request.status }, data: { status, approvedAt, approvedHash },
           include: REQUEST_INCLUDE,
         });
+        await this.deps.audit?.record(tx, draftApproved({ requestId: id, draftHash: approvedHash, occurredAt: approvedAt }));
+        return row;
       });
+      await this.deps.audit?.notify(id);
+      return updated;
     }
     this.validateCloseAt(draftSchema.parse(request.draft));
-    return this.deps.db.creationRequest.update({
-      where: { id, status: request.status }, data: { status, approvedAt: new Date(), approvedHash },
-      include: REQUEST_INCLUDE,
+    const updated = await this.deps.db.$transaction(async tx => {
+      const approvedAt = new Date();
+      const row = await tx.creationRequest.update({
+        where: { id, status: request.status }, data: { status, approvedAt, approvedHash },
+        include: REQUEST_INCLUDE,
+      });
+      // The approval and its public statement commit together: a request cannot be approved
+      // without the statement being queued, and the statement cannot exist without the approval.
+      await this.deps.audit?.record(tx, draftApproved({ requestId: id, draftHash: approvedHash, occurredAt: approvedAt }));
+      return row;
     });
+    await this.deps.audit?.notify(id);
+    return updated;
   }
 
   /** Verification is optional. It only affects price after the server confirms the credential. */
@@ -680,14 +726,31 @@ export class CreationService {
       throw new WorkflowError('payment_declined', 402);
     }
     try {
-      const [updatedPayment, updatedRequest] = await this.deps.db.$transaction([
-        this.deps.db.paymentIntent.update({
+      const settledAt = new Date();
+      const [updatedPayment, updatedRequest] = await this.deps.db.$transaction(async tx => {
+        const updated = await tx.paymentIntent.update({
           where: { id: payment.id },
-          data: { status: 'SETTLED', transactionRef: settled.transaction, payer: settled.payer, payloadHash: payloadFingerprint(header), settledAt: new Date(), failureCode: null },
-        }),
-        this.deps.db.creationRequest.update({ where: { id }, data: { status: 'PAID' }, include: REQUEST_INCLUDE }),
-      ]);
+          data: { status: 'SETTLED', transactionRef: settled.transaction, payer: settled.payer, payloadHash: payloadFingerprint(header), settledAt, failureCode: null },
+        });
+        const row = await tx.creationRequest.update({ where: { id }, data: { status: 'PAID' }, include: REQUEST_INCLUDE });
+        // Written only now, with the settlement receipt in hand: no successful-payment statement
+        // exists for a payment this service has not recorded as settled.
+        //
+        // Guarded like the creation statement below. A payment can only be submitted for an
+        // approved request, so the hash is always there — but an unpublishable statement must
+        // never be the reason a settled Hedera payment is rolled back into reconciliation.
+        const approvedHash = request.approvedHash ?? request.draftHash;
+        if (approvedHash) {
+          await this.deps.audit?.record(tx, paymentSettled({
+            requestId: id, draftHash: approvedHash, occurredAt: settledAt,
+            network: updated.network, asset: updated.asset, amountUnits: updated.amountUnits,
+            transactionRef: settled.transaction,
+          }));
+        }
+        return [updated, row] as const;
+      });
       await this.deps.enqueue?.(id).catch(() => undefined);
+      await this.deps.audit?.notify(id);
       return { request: updatedRequest, payment: updatedPayment, settlement: settled, replay: false };
     } catch (error) {
       // A duplicate settlement reference or payload means this money was already accounted for.
@@ -697,6 +760,29 @@ export class CreationService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Records one MARKET_CREATED statement inside the transaction that marks the market created.
+   *
+   * A statement is only written when every reference in it exists: the settled payment, the
+   * approved draft hash and the deployed address. `transactionHash` may legitimately be null on a
+   * resumed run that found the market already in the registry without observing its broadcast;
+   * the address and the derived creation id stay checkable on chain in that case.
+   */
+  private async recordCreation(
+    tx: Prisma.TransactionClient,
+    request: { id: string; approvedHash: string | null; draftHash: string | null; payment: { transactionRef: string | null } | null },
+    market: { address: string; transactionHash: string | null; position?: number },
+  ) {
+    const transactionRef = request.payment?.transactionRef;
+    const draftHashValue = request.approvedHash ?? request.draftHash;
+    if (!this.deps.audit || !transactionRef || !draftHashValue) return;
+    await this.deps.audit.record(tx, marketCreated({
+      requestId: request.id, draftHash: draftHashValue, occurredAt: new Date(), transactionRef,
+      chainId: this.deps.chainId ?? 11155111, address: market.address,
+      transactionHash: market.transactionHash, position: market.position,
+    }));
   }
 
   /** Runs the paid creation step. Safe to retry: the registry is checked before any broadcast. */
@@ -720,8 +806,15 @@ export class CreationService {
         requestId: id, question: draft.question, rules: draft.rules, evidenceSource: draft.evidenceSource,
         closeAt: Math.floor(new Date(draft.closeAt).getTime() / 1000),
       });
-      return await this.deps.db.creationRequest.update({
-        where: { id }, data: { status: 'CREATED', marketAddress: created.market, creationTxHash: created.transactionHash ?? request.creationTxHash },
+      // Past this point the deployment receipt is confirmed and the registry names the market,
+      // which is the only condition under which a creation statement is written.
+      const transactionHash = created.transactionHash ?? request.creationTxHash;
+      return await this.deps.db.$transaction(async tx => {
+        const row = await tx.creationRequest.update({
+          where: { id }, data: { status: 'CREATED', marketAddress: created.market, creationTxHash: transactionHash },
+        });
+        await this.recordCreation(tx, request, { address: created.market, transactionHash });
+        return row;
       });
     } catch (error) {
       const code = error instanceof Error ? error.message.slice(0, 120) : 'creation_failed';
@@ -732,6 +825,10 @@ export class CreationService {
         data: { status: 'FAILED', failureCode: 'creation_failed', failureDetail: code },
       });
       throw error;
+    } finally {
+      // Whatever the outcome, wake the publisher for whatever this run committed. It never
+      // throws, so it cannot turn a successful creation into a failed one.
+      await this.deps.audit?.notify(id);
     }
   }
 
@@ -762,11 +859,16 @@ export class CreationService {
           requestId: id, position: child.position, question: draft.question, rules: draft.rules,
           evidenceSource: draft.evidenceSource, closeAt: Math.floor(new Date(draft.closeAt).getTime() / 1000),
         });
+        const transactionHash = created.transactionHash ?? child.creationTxHash;
         await this.deps.db.$transaction(async tx => {
           await tx.creationChild.update({
             where: { id: child.id },
-            data: { status: 'CREATED', marketAddress: created.market, creationTxHash: created.transactionHash ?? child.creationTxHash, failureCode: null, failureDetail: null },
+            data: { status: 'CREATED', marketAddress: created.market, creationTxHash: transactionHash, failureCode: null, failureDetail: null },
           });
+          // One statement per child, ordered after the payment by its derived sequence. A child
+          // that failed publishes nothing, and a retry that skips an existing child records
+          // nothing new, because the statement's id is derived from the request and position.
+          await this.recordCreation(tx, request, { address: created.market, transactionHash, position: child.position });
           if (request.eventId) {
             // Stored lower-cased, as every address in this schema is: the unique index on it and
             // the lookup that finds a market's event both depend on one canonical form.
