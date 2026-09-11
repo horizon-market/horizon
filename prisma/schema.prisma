@@ -37,6 +37,9 @@ model CreationRequest {
   priceUnits      String       @default("0")
   marketAddress   String?
   creationTxHash  String?
+  // keccak256("horizon-creation:<id>") — the registry key the market is deployed under. Stored so
+  // a MarketCreated event seen on the stream can find its request without reversing a hash.
+  creationId      String?
   failureCode     String?
   failureDetail   String?
   attempts        Int          @default(0)
@@ -44,6 +47,7 @@ model CreationRequest {
   updatedAt       DateTime     @updatedAt
 
   payment      PaymentIntent?
+  notifications Notification[]
   verification HumanVerification?
   children     CreationChild[]
   auditEvents  AuditEvent[]
@@ -52,6 +56,7 @@ model CreationRequest {
   // A requester reads back their own creation history; the portfolio lists it newest first.
   @@index([requester, createdAt])
   @@index([eventId])
+  @@index([creationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +152,8 @@ model CreationChild {
   status         String          @default("PENDING")
   marketAddress  String?
   creationTxHash String?
+  // keccak256("horizon-creation:<requestId>:<position>"); see CreationRequest.creationId.
+  creationId     String?
   failureCode    String?
   failureDetail  String?
   attempts       Int             @default(0)
@@ -157,6 +164,7 @@ model CreationChild {
 
   @@unique([requestId, position])
   @@index([status])
+  @@index([creationId])
 }
 
 // Exactly one payment intent per creation request; retries reuse it and never re-settle.
@@ -383,4 +391,121 @@ model SyncCheckpoint {
   durationMs   Int      @default(0)
   syncedAt     DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Live layer. The mirror above is owned by the periodic sync, which deletes any
+// row the Graph sweep did not return — so nothing below is ever written into it.
+// The stream consumer records what it sees on chain here, block by block, and
+// reads apply these changes on top of whichever snapshot they are served from.
+// Once a sweep reaches a change's block the snapshot covers it and the change
+// is retired; a reorg deletes what the chain reverted. Every write for one block
+// lands in one transaction with the stream cursor, so a crash can only replay a
+// block, never half-record one.
+// ---------------------------------------------------------------------------
+
+// Where the Substreams consumer resumes from. One row, keyed by the module it consumes.
+model StreamCheckpoint {
+  id          String   @id
+  cursor      String   @default("")
+  blockNumber Int      @default(0)
+  blockHash   String   @default("")
+  // The server's final-block height as of the last message; a change at or below it is final.
+  finalBlock  Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+// One observed change to one indexed entity, applied over a snapshot older than its block.
+model LiveChange {
+  id           BigInt    @id @default(autoincrement())
+  // 'market' | 'curve'. Trades have their own table below; they never patch a snapshot.
+  entity       String
+  // The market address or the order hash the change belongs to, lower-cased.
+  key          String
+  // The chain event that produced it, e.g. MARKET_CREATED, CURVE_FILLED.
+  kind         String
+  // Lower-cased so a market page and a maker's curves can select their changes by index.
+  market       String
+  maker        String?
+  payload      Json
+  blockNumber  Int
+  blockHash    String
+  txHash       String
+  logIndex     Int
+  final        Boolean   @default(false)
+  // Set once a sync sweep reached this block: the snapshot now carries the change itself.
+  retiredAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  // A redelivered block upserts every change it carries and creates nothing new.
+  @@unique([txHash, logIndex, entity, key])
+  @@index([entity, key, blockNumber])
+  @@index([market, blockNumber])
+  @@index([maker, blockNumber])
+  @@index([blockNumber])
+  @@index([retiredAt])
+}
+
+// One taker route, from RouteExecuted. The fills inside it are not trades and not volume.
+model Trade {
+  // "<txHash>:<logIndex>", the same identity the Subgraph gives a Route.
+  id          String    @id
+  market      String
+  taker       String
+  recipient   String
+  isYes       Boolean
+  isBuy       Boolean
+  shares      String
+  usdc        String
+  fills       Int
+  blockNumber Int
+  blockHash   String
+  txHash      String
+  final       Boolean   @default(false)
+  // Kept after a reorg rather than deleted, and excluded from every history read.
+  revertedAt  DateTime?
+  source      String    @default("stream")
+  createdAt   DateTime  @default(now())
+
+  @@index([market, blockNumber])
+  @@index([blockNumber])
+}
+
+// A creator-facing notice. Written by whichever of the receipt path and the stream sees the
+// market first and merged by the other, so there is exactly one per created market.
+model Notification {
+  id            String          @id @default(uuid()) @db.Uuid
+  // "<requestId>:<position or ->:<marketAddress>".
+  dedupeKey     String          @unique
+  requestId     String          @db.Uuid
+  request       CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  position      Int?
+  marketAddress String
+  kind          String
+  title         String
+  body          String          @default("")
+  href          String
+  blockNumber   Int?
+  txHash        String?
+  // 'receipt' and/or 'stream'. A reorg removes a notice the stream alone vouched for.
+  sources       String[]        @default([])
+  readAt        DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([requestId, createdAt])
+  @@index([marketAddress])
+}
+
+// The SSE replay log. A browser that reconnects with the last id it saw is sent what it missed.
+model LiveEvent {
+  id          BigInt   @id @default(autoincrement())
+  type        String
+  // 'public', or 'creation:<requestId>' for a notice only that request's holder may receive.
+  topic       String
+  payload     Json
+  blockNumber Int?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
 }
