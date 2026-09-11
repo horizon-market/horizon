@@ -1,0 +1,6 @@
+target/
+src/abi/*.rs
+!src/abi/mod.rs
+src/pb/*.rs
+!src/pb/mod.rs
+.substreams.env
