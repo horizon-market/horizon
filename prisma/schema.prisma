@@ -480,7 +480,9 @@ model Notification {
   requestId     String          @db.Uuid
   request       CreationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   position      Int?
+  // Empty for an event notice, which names the whole group rather than one market.
   marketAddress String
+  // 'market.created' for a standalone market; 'event.created', once, for a group.
   kind          String
   title         String
   body          String          @default("")

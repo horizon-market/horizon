@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeEvents } from '../src/stream/events.js';
 import { MessageBatch } from '../src/live/messages.js';
-import { notificationKey } from '../src/live/notifications.js';
+import { eventNotificationKey, notificationKey } from '../src/live/notifications.js';
 
 const hex = (byte: number, length: number) => `0x${byte.toString(16).padStart(2, '0').repeat(length)}`;
 const base = { contract: hex(0x2b, 20), blockNumber: '11700000', blockHash: hex(0xee, 32), blockTimestamp: '1789000000', txHash: hex(0xab, 32), txIndex: 3 };
@@ -38,6 +38,8 @@ test('the notification key is the request, the position and the market, never an
   assert.equal(notificationKey('req', undefined, '0xABC'), 'req:-:0xabc');
   assert.equal(notificationKey('req', 2, '0xabc'), 'req:2:0xabc');
   assert.notEqual(notificationKey('req', 0, '0xabc'), notificationKey('req', undefined, '0xabc'));
+  // A group's one notice is keyed on the request alone, and can never collide with a market's.
+  assert.equal(eventNotificationKey('req'), 'req:event');
 });
 
 test('one block of fills coalesces to one message per market per type', () => {

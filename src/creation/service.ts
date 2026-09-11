@@ -14,7 +14,7 @@ import { creationId, type MarketDeployer } from './onchain.js';
 import type { AuditService } from '../audit/service.js';
 import { draftApproved, marketCreated, paymentSettled } from '../audit/events.js';
 import { recordLiveEvents } from '../live/messages.js';
-import { creationMessage, presentNotification, upsertCreatedNotification } from '../live/notifications.js';
+import { creationMessage, presentNotification, upsertCreatedNotification, upsertEventCreatedNotification } from '../live/notifications.js';
 
 export const STATUSES = ['DRAFT', 'APPROVED', 'PAYMENT_REQUIRED', 'PAYMENT_REVIEW', 'PAID', 'CREATING', 'CREATED', 'FAILED', 'ABANDONED'] as const;
 export type Status = typeof STATUSES[number];
@@ -822,13 +822,23 @@ export class CreationService {
    * The stream writes the same notice by the same key when it sees the block; whichever arrives
    * second merges into the first, so a market is announced once however the two paths race.
    */
-  private async announceCreation(tx: Prisma.TransactionClient, market: {
-    requestId: string; position?: number; marketAddress: string; question: string; transactionHash: string | null; status: string;
-  }) {
-    const { notification } = await upsertCreatedNotification(tx, { requestId: market.requestId, position: market.position, marketAddress: market.marketAddress,
+  private async announceCreation(tx: Prisma.TransactionClient, market: { requestId: string; marketAddress: string; question: string; transactionHash: string | null }) {
+    const { notification } = await upsertCreatedNotification(tx, { requestId: market.requestId, marketAddress: market.marketAddress,
       question: market.question, source: 'receipt', txHash: market.transactionHash });
-    await recordLiveEvents(tx, [creationMessage(market.requestId, { position: market.position ?? null, marketAddress: market.marketAddress.toLowerCase(),
-      status: market.status, notification: presentNotification(notification) })]);
+    await recordLiveEvents(tx, [creationMessage(market.requestId, { position: null, marketAddress: market.marketAddress.toLowerCase(),
+      status: 'CREATED', notification: presentNotification(notification) })]);
+  }
+
+  /**
+   * A group's one notice, in the transaction that records the whole request CREATED. Each child
+   * still sends the private message as it deploys — the create page follows it market by market —
+   * but the creator asked for an event, and is told about the event, once. The stream writes the
+   * same notice by the same key when it sees the last child's block.
+   */
+  private async announceEvent(tx: Prisma.TransactionClient, request: { id: string; event: { slug: string; title: string } }, markets: number) {
+    const { notification } = await upsertEventCreatedNotification(tx, { requestId: request.id, slug: request.event.slug, title: request.event.title,
+      markets, source: 'receipt', txHash: null });
+    await recordLiveEvents(tx, [creationMessage(request.id, { status: 'CREATED', notification: presentNotification(notification) })]);
   }
 
   /** Runs the paid creation step. Safe to retry: the registry is checked before any broadcast. */
@@ -863,7 +873,7 @@ export class CreationService {
           where: { id }, data: { status: 'CREATED', marketAddress: created.market, creationTxHash: transactionHash },
         });
         await this.recordCreation(tx, request, { address: created.market, transactionHash });
-        await this.announceCreation(tx, { requestId: id, marketAddress: created.market, question: draft.question, transactionHash, status: 'CREATED' });
+        await this.announceCreation(tx, { requestId: id, marketAddress: created.market, question: draft.question, transactionHash });
         return row;
       });
     } catch (error) {
@@ -919,7 +929,7 @@ export class CreationService {
           // that failed publishes nothing, and a retry that skips an existing child records
           // nothing new, because the statement's id is derived from the request and position.
           await this.recordCreation(tx, request, { address: created.market, transactionHash, position: child.position });
-          await this.announceCreation(tx, { requestId: id, position: child.position, marketAddress: created.market, question: draft.question, transactionHash, status: 'CREATING' });
+          await recordLiveEvents(tx, [creationMessage(id, { position: child.position, marketAddress: created.market.toLowerCase(), status: 'CREATING' })]);
           if (request.eventId) {
             // Stored lower-cased, as every address in this schema is: the unique index on it and
             // the lookup that finds a market's event both depend on one canonical form.
@@ -952,7 +962,10 @@ export class CreationService {
     // nothing and simply confirms the request, which is what makes the job safe to redeliver.
     void deployed;
     return this.deps.db.$transaction(async tx => {
-      if (request.eventId) await tx.marketEvent.update({ where: { id: request.eventId }, data: { status: 'ACTIVE' } });
+      if (request.eventId && request.event) {
+        await tx.marketEvent.update({ where: { id: request.eventId }, data: { status: 'ACTIVE' } });
+        await this.announceEvent(tx, { id, event: request.event }, selected.length);
+      }
       return tx.creationRequest.update({
         where: { id }, data: { status: 'CREATED', failureCode: null, failureDetail: null }, include: REQUEST_INCLUDE,
       });

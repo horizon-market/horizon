@@ -60,8 +60,10 @@ the block comparison alone, which is why a sweep that lags the stream can neithe
 market nor duplicate a fill.
 
 **Each event.** `MarketCreated` records the market and, when its registry key (or, for a request
-that predates the key, its address) names a creation request, writes the creator's notice and
-patches the event child's address — one child at a time, never waiting for the group.
+that predates the key, its address) names a creation request, announces it to the creator. A
+standalone market gets its notice at once. A group's child has its event address patched at once
+— one child at a time, so the event page follows each market — but the notice waits: it is
+written once, when the last selected child exists, and says the event was created.
 `CurveFilled` patches the curve and announces `liquidity.changed` for its market and for every
 other market where that maker has executable depth, because one wallet backs all of them; a
 block's worth of fills coalesces to one message per market. `RouteExecuted` is the trade; the
@@ -78,10 +80,11 @@ is seen and carries `final: false` until the stream's own final-block height pas
 stream vouched for, and tells open pages to correct themselves.
 
 **One notice, two witnesses.** The deployment receipt in the worker and the stream both announce
-"your market was created", by the same key — the request, the child position and the market
-address. Whichever arrives first creates the notice in its own transaction; the second merges
-its source into it. The notice says *created*: whether the market can be traded is a separate
-fact, decided by executable liquidity, and never claimed here.
+"your market was created", by the same key — the request and the market address — or, for a
+group, "your event was created", keyed on the request alone. Whichever arrives first creates the
+notice in its own transaction; the second merges its source into it. The notice says *created*:
+whether a market can be traded is a separate fact, decided by executable liquidity, and never
+claimed here.
 
 **Delivery.** Every SSE message is a `LiveEvent` row written in the block's transaction, and
 `pg_notify` fires on commit. The API's `LiveBus` holds one `LISTEN` connection and, on every

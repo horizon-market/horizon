@@ -7,7 +7,8 @@ import { createDatabase } from '../src/db.js';
 import { creationId } from '../src/creation/onchain.js';
 import { processBlock, undoTo, STREAM_CHECKPOINT, type BlockBatch } from '../src/stream/processor.js';
 import type { ChainEvent } from '../src/stream/events.js';
-import { upsertCreatedNotification } from '../src/live/notifications.js';
+import { eventNotificationKey, upsertCreatedNotification, upsertEventCreatedNotification } from '../src/live/notifications.js';
+import { creationTopic } from '../src/live/messages.js';
 import { applyOverlay, LiveStore } from '../src/trading/overlay.js';
 import { MarketProjectionStore, syncMarkets, type MarketSource } from '../src/trading/projection.js';
 import type { ProjectedCurve, ProjectedMarket } from '../src/trading/graph.js';
@@ -128,7 +129,7 @@ test('a reorg deletes changes above the last valid block, marks trades, and keep
   assert.deepEqual(await new LiveStore(db).trades(OTHER, 0), []);
 });
 
-test('receipt first or stream first, one notice with both sources; a group child is announced on its own', async () => {
+test('receipt first or stream first, one notice with both sources; a group is announced once, when its last child exists', async () => {
   await reset();
   const single = await creatingRequest('Single');
   await db.$transaction(tx => upsertCreatedNotification(tx, { requestId: single, marketAddress: MARKET, question: 'Single', source: 'receipt', txHash: hex(0x01, 32) }));
@@ -138,24 +139,56 @@ test('receipt first or stream first, one notice with both sources; a group child
   assert.deepEqual(one[0]!.sources, ['receipt', 'stream']);
   assert.equal(one[0]!.txHash, hex(0x01, 32));
 
-  // A group: the stream sees child 1 before the receipt path records it.
+  // A group of two selected children and one deselected: the stream sees child 1 before the
+  // receipt path records it. Its address is patched at once; the creator is not told yet.
   const group = randomUUID();
   const event = await db.marketEvent.create({ data: { slug: `g-${group.slice(0, 8)}`, title: 'Group', members: { create: [
     { position: 0, outcomeLabel: 'A', question: 'A?' }, { position: 1, outcomeLabel: 'B', question: 'B?' } ] } } });
   await db.creationRequest.create({ data: { id: group, idempotencyKey: randomUUID(), question: 'Group', requesterKind: 'browser', status: 'CREATING', kind: 'GROUP', eventId: event.id,
     children: { create: [
       { position: 0, outcomeLabel: 'A', draft: { question: 'A?' }, draftHash: 'a', status: 'CREATING', creationId: creationId(group, 0) },
-      { position: 1, outcomeLabel: 'B', draft: { question: 'B?' }, draftHash: 'b', status: 'PENDING', creationId: creationId(group, 1) } ] } } });
-  await processBlock({ db }, batch(501, [createdEvent(501, OTHER, creationId(group, 1), 'B?')]));
-  const child = await db.notification.findFirstOrThrow({ where: { requestId: group } });
-  assert.equal(child.position, 1);
-  assert.equal(child.body, 'B?');
-  assert.deepEqual(child.sources, ['stream']);
+      { position: 1, outcomeLabel: 'B', draft: { question: 'B?' }, draftHash: 'b', status: 'PENDING', creationId: creationId(group, 1) },
+      { position: 2, outcomeLabel: 'C', draft: { question: 'C?' }, draftHash: 'c', status: 'SKIPPED' } ] } } });
+  const first = await processBlock({ db }, batch(501, [createdEvent(501, OTHER, creationId(group, 1), 'B?')]));
+  assert.equal(first.notifications, 0);
+  assert.equal(await db.notification.count({ where: { requestId: group } }), 0);
   const member = await db.eventMarket.findFirstOrThrow({ where: { eventId: event.id, position: 1 } });
   assert.equal(member.marketAddress, OTHER);
-  await db.$transaction(tx => upsertCreatedNotification(tx, { requestId: group, position: 1, marketAddress: OTHER, question: 'B?', source: 'receipt', txHash: null }));
+  // The child still reaches the creator's open tab, so the create page follows it — without a notice.
+  const childMessage = await db.liveEvent.findFirstOrThrow({ where: { type: 'creation.updated', topic: creationTopic(group) }, orderBy: { id: 'desc' } });
+  assert.equal((childMessage.payload as { position: number }).position, 1);
+  assert.equal((childMessage.payload as { notification?: unknown }).notification, undefined);
+  // The last selected child completes the event: one notice, for the event, with the block that completed it.
+  const THIRD = hex(0x55, 20);
+  const second = await processBlock({ db }, batch(502, [createdEvent(502, THIRD, creationId(group, 0), 'A?')]));
+  assert.equal(second.notifications, 1);
+  const notice = await db.notification.findFirstOrThrow({ where: { requestId: group } });
+  assert.equal(notice.dedupeKey, eventNotificationKey(group));
+  assert.equal(notice.kind, 'event.created');
+  assert.equal(notice.title, 'Your event was created');
+  assert.equal(notice.body, 'Group · 2 markets');
+  assert.equal(notice.href, `/events/${event.slug}`);
+  assert.equal(notice.position, null);
+  assert.equal(notice.blockNumber, 502);
+  assert.deepEqual(notice.sources, ['stream']);
+  const eventMessage = await db.liveEvent.findFirstOrThrow({ where: { type: 'creation.updated', topic: creationTopic(group) }, orderBy: { id: 'desc' } });
+  assert.equal((eventMessage.payload as { notification: { id: string } }).notification.id, notice.id);
+  // The receipt path, arriving second, merges into the same notice.
+  await db.$transaction(tx => upsertEventCreatedNotification(tx, { requestId: group, slug: event.slug, title: 'Group', markets: 2, source: 'receipt', txHash: null }));
   assert.equal(await db.notification.count({ where: { requestId: group } }), 1);
   assert.deepEqual((await db.notification.findFirstOrThrow({ where: { requestId: group } })).sources, ['stream', 'receipt']);
+  // A reorg below the completing block withdraws the notice the stream alone vouched for — and the address.
+  const alone = randomUUID();
+  const aloneEvent = await db.marketEvent.create({ data: { slug: `g-${alone.slice(0, 8)}`, title: 'Alone', members: { create: [{ position: 0, outcomeLabel: 'A', question: 'A?' }] } } });
+  await db.creationRequest.create({ data: { id: alone, idempotencyKey: randomUUID(), question: 'Alone', requesterKind: 'browser', status: 'CREATING', kind: 'GROUP', eventId: aloneEvent.id,
+    children: { create: [{ position: 0, outcomeLabel: 'A', draft: { question: 'A?' }, draftHash: 'a', status: 'CREATING', creationId: creationId(alone, 0) }] } } });
+  await processBlock({ db }, batch(503, [createdEvent(503, hex(0x66, 20), creationId(alone, 0), 'A?')]));
+  assert.equal((await db.notification.findFirstOrThrow({ where: { requestId: alone } })).body, 'Alone · 1 market');
+  const undone = await undoTo({ db }, { number: 502, hash: hex(502 % 256, 32), cursor: 'cursor-502' });
+  assert.equal(undone.notifications, 1);
+  assert.equal(await db.notification.count({ where: { requestId: alone } }), 0);
+  assert.equal(await db.notification.count({ where: { requestId: group } }), 1);
+  assert.equal((await db.eventMarket.findFirstOrThrow({ where: { eventId: aloneEvent.id, position: 0 } })).marketAddress, null);
   // A request that predates the stored key is still found, by the address the receipt recorded.
   const legacy = randomUUID();
   await db.creationRequest.create({ data: { id: legacy, idempotencyKey: randomUUID(), question: 'Legacy', requesterKind: 'browser', status: 'CREATED', marketAddress: hex(0x44, 20).toUpperCase().replace('0X', '0x') } });

@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type { Address, Hex } from 'viem';
 import type { ChainEvent } from './events.js';
 import { MessageBatch, PUBLIC_TOPIC, recordLiveEvents, type LiveMessage } from '../live/messages.js';
-import { creationMessage, presentNotification, upsertCreatedNotification } from '../live/notifications.js';
+import { creationMessage, presentNotification, upsertCreatedNotification, upsertEventCreatedNotification } from '../live/notifications.js';
 import type { CurvePayload, MarketPayload } from '../trading/overlay.js';
 
 export const STREAM_CHECKPOINT = 'horizon_events';
@@ -53,6 +53,20 @@ async function creationOf(tx: Prisma.TransactionClient, creationId: string, mark
 }
 
 /**
+ * Whether every selected child of a group now has an address, from either witness — and if so,
+ * what the one notice a group gets should say. Membership is read from the request's children,
+ * not the event's members, so an outcome deselected before approval never holds the group back.
+ */
+async function completedEvent(tx: Prisma.TransactionClient, requestId: string, eventId: string) {
+  const selected = await tx.creationChild.findMany({ where: { requestId, status: { not: 'SKIPPED' } }, select: { position: true } });
+  if (selected.length === 0) return null;
+  const placed = await tx.eventMarket.count({ where: { eventId, position: { in: selected.map(child => child.position) }, marketAddress: { not: null } } });
+  if (placed < selected.length) return null;
+  const event = await tx.marketEvent.findUnique({ where: { id: eventId }, select: { slug: true, title: true } });
+  return event && { ...event, markets: selected.length };
+}
+
+/**
  * Records one block. Everything — changes, trades, notices, the SSE messages and the cursor — is
  * one transaction, so a crash can only replay the block, and a replay writes nothing new: every
  * row is keyed by what identifies it on chain. The messages are only emitted for rows this
@@ -94,15 +108,20 @@ export async function processBlock(deps: ProcessorDependencies, batch: BlockBatc
           const isNew = await write({ entity: 'market', key: market, kind: event.kind, market, maker: null, payload, ...at(event) });
           const creation = await creationOf(tx, event.data.creationId, market);
           if (creation) {
-            const { notification, created } = await upsertCreatedNotification(tx, { requestId: creation.requestId, position: creation.position,
-              marketAddress: market, question: creation.question, source: 'stream', blockNumber: event.blockNumber, txHash: event.txHash });
-            if (created) notifications++;
-            // A group's child is announced the moment it exists; nothing waits for its siblings.
-            if (creation.eventId && creation.position !== undefined) {
+            const witness = { source: 'stream' as const, blockNumber: event.blockNumber, txHash: event.txHash };
+            let announced;
+            if (creation.position === undefined) {
+              announced = await upsertCreatedNotification(tx, { ...witness, requestId: creation.requestId, marketAddress: market, question: creation.question });
+            } else if (creation.eventId) {
+              // A group's child address is patched the moment it exists, so the event page follows
+              // each market; the creator hears once, when the last selected child is there.
               await tx.eventMarket.updateMany({ where: { eventId: creation.eventId, position: creation.position, marketAddress: null }, data: { marketAddress: market } });
+              const completed = await completedEvent(tx, creation.requestId, creation.eventId);
+              if (completed) announced = await upsertEventCreatedNotification(tx, { ...witness, requestId: creation.requestId, ...completed });
             }
-            if (isNew) messages.push('creation.updated', creationMessage(creation.requestId, {}).topic,
-              { requestId: creation.requestId, position: creation.position ?? null, marketAddress: market, notification: presentNotification(notification) });
+            if (announced?.created) notifications++;
+            if (isNew) messages.push('creation.updated', creationMessage(creation.requestId, {}).topic, { requestId: creation.requestId,
+              position: creation.position ?? null, marketAddress: market, ...(announced ? { notification: presentNotification(announced.notification) } : {}) });
           }
           if (isNew) messages.marketUpdated(market, { created: true });
           break;

@@ -15,6 +15,7 @@ import { EventService } from '../src/events/service.js';
 import { AdminService } from '../src/admin/service.js';
 import { GammaClient, POLYMARKET_API_ORIGIN } from '../src/imports/polymarket.js';
 import { creationId, type MarketDeployer, type MarketPlan } from '../src/creation/onchain.js';
+import { creationTopic } from '../src/live/messages.js';
 import type { PaymentFacilitator, PaymentPayload, PaymentRequirements } from '../src/payments/x402.js';
 import type { HumanVerifier } from '../src/world/verifier.js';
 import type { ImportsConfig, PaymentsConfig, WorldConfig } from '../src/config.js';
@@ -207,12 +208,24 @@ test('an import creates one event, one payment and one market per selected child
   assert.deepEqual(event.members.map(member => member.marketAddress),
     children.map(child => child.marketAddress!.toLowerCase()));
   assert.ok(event.members.every(member => member.marketAddress === member.marketAddress!.toLowerCase()));
+  // Three markets, one notice: the creator asked for an event and is told about the event, once it is whole.
+  const notices = await db.notification.findMany({ where: { requestId: id } });
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]!.kind, 'event.created');
+  assert.equal(notices[0]!.href, `/events/${event.slug}`);
+  assert.equal(notices[0]!.body, `${event.title} · 3 markets`);
+  assert.deepEqual(notices[0]!.sources, ['receipt']);
+  // Each child still told the creator's open tab as it deployed; only the last message carries the notice.
+  const messages = await db.liveEvent.findMany({ where: { type: 'creation.updated', topic: creationTopic(id) }, orderBy: { id: 'asc' } });
+  assert.deepEqual(messages.map(message => (message.payload as { position?: number }).position), [0, 1, 2, undefined]);
+  assert.deepEqual(messages.map(message => 'notification' in (message.payload as object)), [false, false, false, true]);
 
   // Re-running the finished job deploys nothing and charges nothing.
   const rerun = await target.runCreation(id);
   assert.equal(rerun.status, 'CREATED');
   assert.equal(deployer.broadcasts.length, 3);
   assert.equal(facilitator.settleCalls, 1);
+  assert.equal(await db.notification.count({ where: { requestId: id } }), 1);
 });
 
 test('a second import of the same source event links to what exists instead of charging again', { timeout: 30_000 }, async () => {
@@ -329,6 +342,8 @@ test('a partial deployment failure keeps what was created, charges nothing more,
   const survivors = afterFailure.children.filter(child => child.marketAddress).map(child => child.marketAddress);
   assert.equal(survivors.length, 2);
   assert.equal(deployer.broadcasts.length, 2);
+  // Two of three exist; the event is not ready, so nothing has been announced.
+  assert.equal(await db.notification.count({ where: { requestId: id } }), 0);
 
   // The retry deploys only what is missing. Nothing already created is recreated, and the
   // settled payment is neither re-issued nor re-charged.
@@ -343,6 +358,7 @@ test('a partial deployment failure keeps what was created, charges nothing more,
   const payment = await db.paymentIntent.findUniqueOrThrow({ where: { requestId: id } });
   assert.equal(payment.status, 'SETTLED');
   assert.equal(payment.amountUnits, '300000000');
+  assert.equal(await db.notification.count({ where: { requestId: id, kind: 'event.created' } }), 1);
 });
 
 test('a run interrupted mid-deployment resumes instead of stranding the paid request', { timeout: 60_000 }, async () => {

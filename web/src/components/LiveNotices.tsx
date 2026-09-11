@@ -8,7 +8,8 @@ type Notice = CreationNotification & { requestId: string };
 const RECENT = 5;
 
 /**
- * The bar at the bottom of the site: "your market was created", with the link to it.
+ * The bar at the bottom of the site: "your market was created" — or, for a group, "your event
+ * was created", once, when its last market exists — with the link to it.
  *
  * Notices arrive live while the tab is open and are read back from the server when it is not,
  * so a creator who left mid-creation still finds theirs on return. Only unread ones are shown,
@@ -69,7 +70,7 @@ export function LiveNotices() {
             <strong>{notice.title}</strong>
             {notice.body && <span className="small muted"> · {notice.body}</span>}
           </div>
-          <a className="button primary" href={notice.href}>Open market</a>
+          <a className="button primary" href={notice.href}>{notice.kind === 'event.created' ? 'Open event' : 'Open market'}</a>
           <button aria-label="Dismiss" onClick={() => dismiss(notice)}>×</button>
           {!connected && <span className="small muted" title="Reconnecting to live updates">offline</span>}
         </div>
