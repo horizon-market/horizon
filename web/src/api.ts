@@ -226,7 +226,7 @@ export type MarketAudit = {
 /** A creator-facing notice, kept until dismissed. `sources` says who vouched: the receipt, the chain stream, or both. */
 export type CreationNotification = {
   id: string; kind: string; title: string; body: string; href: string; marketAddress: string; position: number | null;
-  sources: string[]; readAt: string | null; createdAt: string; blockNumber: number | null;
+  sources: string[]; readAt: string | null; createdAt: string; blockNumber: number | null; txHash: string | null;
 };
 /** One taker route against a market. Fills inside it are not separate trades. */
 export type Trade = {

@@ -19,10 +19,11 @@ export const eventNotificationKey = (requestId: string) => `${requestId}:event`;
 
 export const presentNotification = (row: {
   id: string; kind: string; title: string; body: string; href: string; marketAddress: string; position: number | null;
-  sources: string[]; readAt: Date | null; createdAt: Date; blockNumber: number | null;
+  sources: string[]; readAt: Date | null; createdAt: Date; blockNumber: number | null; txHash: string | null;
 }) => ({
   id: row.id, kind: row.kind, title: row.title, body: row.body, href: row.href, marketAddress: row.marketAddress,
   position: row.position, sources: row.sources, readAt: row.readAt, createdAt: row.createdAt, blockNumber: row.blockNumber,
+  txHash: row.txHash,
 });
 
 type Witness = { dedupeKey: string; source: NotificationSource; blockNumber?: number; txHash?: string | null };

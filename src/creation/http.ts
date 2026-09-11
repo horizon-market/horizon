@@ -99,6 +99,7 @@ export function present(request: PublicRequest, quote?: (quantity: number) => un
       id: notification.id, kind: notification.kind, title: notification.title, body: notification.body, href: notification.href,
       marketAddress: notification.marketAddress, position: notification.position, sources: notification.sources,
       readAt: notification.readAt, createdAt: notification.createdAt, blockNumber: notification.blockNumber,
+      txHash: notification.txHash,
     })),
     // Trading is free; this charge buys the creation service only.
     fees: { maker: 0, taker: 0, routing: 0, protocol: 0 },
