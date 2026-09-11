@@ -14,8 +14,10 @@ export type Side = { isYes: boolean; isBuy: boolean };
 export const sideLabel = (side: Side) => `${side.isBuy ? 'Buy' : 'Sell'} ${side.isYes ? 'YES' : 'NO'}`;
 
 /** Takes the best executable route now. The quote it shows is the one the wallet will sign. */
-export function MarketOrder({ market, side, account, onDone, onSwitchToLimit }: {
+export function MarketOrder({ market, side, account, onDone, onSwitchToLimit, refreshKey = 0 }: {
   market: string; side: Side; account?: string; onDone: () => void; onSwitchToLimit: () => void;
+  /** Bumped by the page when the market's liquidity changed on chain: the shown price is re-quoted. */
+  refreshKey?: number;
 }) {
   const [size, setSize] = useState('1');
   const [slippageBps, setSlippageBps] = useState(50);
@@ -67,7 +69,7 @@ export function MarketOrder({ market, side, account, onDone, onSwitchToLimit }: 
     };
     const timer = setTimeout(() => void run(), 700);
     return () => clearTimeout(timer);
-  }, [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString()]);
+  }, [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString(), refreshKey]);
 
   const expired = quote ? quote.deadline <= now : false;
   const busy = tx.phase === 'signing' || tx.phase === 'pending';

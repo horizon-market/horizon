@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package horizon.v1;
+
+// Every event Horizon's own contracts emitted in one block, in log order. Addresses and hashes
+// are 0x-prefixed lower-case hex; uint256 values are decimal strings, as everywhere in Horizon.
+message HorizonEvents {
+  repeated HorizonEvent events = 1;
+}
+
+message HorizonEvent {
+  // MARKET_CREATED | CURVE_FILLED | ROUTE_EXECUTED | STRATEGY_ADMITTED | SHIPPED | DOCKED |
+  // COLLATERAL_CHANGED | MARKET_RESOLVED
+  string kind = 1;
+  string contract = 2;
+  uint64 block_number = 3;
+  string block_hash = 4;
+  uint64 block_timestamp = 5;
+  string tx_hash = 6;
+  uint32 log_index = 7;
+  uint32 tx_index = 8;
+  oneof data {
+    MarketCreated market_created = 10;
+    CurveFilled curve_filled = 11;
+    RouteExecuted route_executed = 12;
+    StrategyAdmitted strategy_admitted = 13;
+    Shipped shipped = 14;
+    Docked docked = 15;
+    CollateralChanged collateral_changed = 16;
+    MarketResolved market_resolved = 17;
+  }
+}
+
+message MarketCreated {
+  string creation_id = 1;
+  string market = 2;
+  string resolver = 3;
+  string yes_token = 4;
+  string no_token = 5;
+  uint64 close_at = 6;
+  string question = 7;
+  string rules = 8;
+  string evidence_source = 9;
+}
+
+message CurveFilled {
+  string order_hash = 1;
+  string market = 2;
+  string maker = 3;
+  string shares = 4;
+  string usdc_amount = 5;
+  string total_filled = 6;
+}
+
+message RouteExecuted {
+  string market = 1;
+  string taker = 2;
+  string recipient = 3;
+  bool is_yes = 4;
+  bool is_buy = 5;
+  string shares = 6;
+  string usdc_amount = 7;
+  string fills = 8;
+}
+
+message StrategyAdmitted {
+  string order_hash = 1;
+  string market = 2;
+  string maker = 3;
+  string token = 4;
+  string commitment = 5;
+  string committed_before = 6;
+  string spendable = 7;
+}
+
+// Aqua publication addressed to the Horizon router. The strategy bytes are the router's own
+// encoding; the consumer decodes them through the router, exactly as the Subgraph does.
+message Shipped {
+  string maker = 1;
+  string app = 2;
+  string strategy_hash = 3;
+  string strategy = 4;
+}
+
+message Docked {
+  string maker = 1;
+  string app = 2;
+  string strategy_hash = 3;
+}
+
+message CollateralChanged {
+  string market = 1;
+  string collateral = 2;
+}
+
+message MarketResolved {
+  string market = 1;
+  uint32 result = 2;
+  string resolver = 3;
+  string evidence = 4;
+}

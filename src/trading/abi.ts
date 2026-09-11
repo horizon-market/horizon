@@ -6,6 +6,9 @@ export const routerAbi = parseAbi([
   `function curveCumulative(${curveTuple} s,uint256 q) pure returns (uint256)`,
   `function curveOutcome(${curveTuple} s) view returns (address)`,
   'function filledShares(bytes32) view returns (uint256)',
+  // Validates Aqua publication bytes and names the maker and order hash they belong to; the same
+  // call the Subgraph mapping makes, so the stream and the indexer recognise the same orders.
+  `function decodeCurveOrder(bytes encodedOrder) view returns (${curveTuple} strategy,address maker,bytes32 orderHash)`,
   'function registry() view returns (address)',
   'function AQUA() view returns (address)',
   // Publication. `admitCurve` is the step that enforces the market's order budget, and an order

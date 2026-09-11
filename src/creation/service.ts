@@ -10,9 +10,11 @@ import { GammaClient, ImportError, parsePolymarketUrl } from '../imports/polymar
 import { normalizeEvent, outcomesComplete, slugify, snapshotMarket, type NormalizedEvent } from '../imports/normalize.js';
 import { buildRequirements, decodePayment, paymentMatches, paymentNonce, payloadFingerprint, PaymentPayloadError, PaymentRejectedError, SettlementAmbiguousError, type PaymentFacilitator } from '../payments/x402.js';
 import { createRpContext, proofSchema, VerificationRejectedError, VerificationUnavailableError, type HumanVerifier, type VerificationProof } from '../world/verifier.js';
-import type { MarketDeployer } from './onchain.js';
+import { creationId, type MarketDeployer } from './onchain.js';
 import type { AuditService } from '../audit/service.js';
 import { draftApproved, marketCreated, paymentSettled } from '../audit/events.js';
+import { recordLiveEvents } from '../live/messages.js';
+import { creationMessage, presentNotification, upsertCreatedNotification } from '../live/notifications.js';
 
 export const STATUSES = ['DRAFT', 'APPROVED', 'PAYMENT_REQUIRED', 'PAYMENT_REVIEW', 'PAID', 'CREATING', 'CREATED', 'FAILED', 'ABANDONED'] as const;
 export type Status = typeof STATUSES[number];
@@ -81,6 +83,7 @@ const REQUEST_INCLUDE = {
   payment: true, verification: true,
   children: { orderBy: { position: 'asc' } },
   event: { include: { members: { orderBy: { position: 'asc' } } } },
+  notifications: { orderBy: { createdAt: 'desc' } },
   // The public audit trail of this request, in publication order.
   auditEvents: { orderBy: { sequence: 'asc' } },
 } as const;
@@ -99,6 +102,35 @@ export class CreationService {
     if (!token || expected.length !== 32) throw new WorkflowError('unauthorized', 401);
     const actual = hashToken(token);
     if (!timingSafeEqual(actual, expected)) throw new WorkflowError('unauthorized', 401);
+  }
+
+  /**
+   * Which of these requests the caller holds the token for, for a subscription that names several.
+   * The ones that fail are dropped without a word: an answer that named them would tell a caller
+   * which ids exist, which is more than a wrong token should learn.
+   */
+  async authorized(claims: { id: string; token: string }[]): Promise<string[]> {
+    if (claims.length === 0) return [];
+    const rows = await this.deps.db.creationRequest.findMany({ where: { id: { in: claims.map(claim => claim.id) } }, select: { id: true, accessTokenHash: true } });
+    const byId = new Map(rows.map(row => [row.id, row]));
+    const granted: string[] = [];
+    for (const claim of claims) {
+      const row = byId.get(claim.id);
+      if (!row) continue;
+      try { this.authorize(row, claim.token); granted.push(claim.id); } catch { /* not this caller's request */ }
+    }
+    return granted;
+  }
+
+  /** A notice is the requester's to dismiss; the same token that reads the request marks it. */
+  async markNotificationRead(id: string, token: string | undefined, notificationId: string) {
+    await this.load(id, token);
+    const updated = await this.deps.db.notification.updateMany({ where: { id: notificationId, requestId: id, readAt: null }, data: { readAt: new Date() } });
+    if (updated.count === 0) {
+      const exists = await this.deps.db.notification.findFirst({ where: { id: notificationId, requestId: id }, select: { id: true } });
+      if (!exists) throw new WorkflowError('unknown_notification', 404);
+    }
+    return this.load(id, token);
   }
 
   private async load(id: string, token: string | undefined) {
@@ -785,6 +817,20 @@ export class CreationService {
     }));
   }
 
+  /**
+   * The creator's notice and the private live message, in the transaction that records CREATED.
+   * The stream writes the same notice by the same key when it sees the block; whichever arrives
+   * second merges into the first, so a market is announced once however the two paths race.
+   */
+  private async announceCreation(tx: Prisma.TransactionClient, market: {
+    requestId: string; position?: number; marketAddress: string; question: string; transactionHash: string | null; status: string;
+  }) {
+    const { notification } = await upsertCreatedNotification(tx, { requestId: market.requestId, position: market.position, marketAddress: market.marketAddress,
+      question: market.question, source: 'receipt', txHash: market.transactionHash });
+    await recordLiveEvents(tx, [creationMessage(market.requestId, { position: market.position ?? null, marketAddress: market.marketAddress.toLowerCase(),
+      status: market.status, notification: presentNotification(notification) })]);
+  }
+
   /** Runs the paid creation step. Safe to retry: the registry is checked before any broadcast. */
   async runCreation(id: string) {
     const request = await this.deps.db.creationRequest.findUnique({ where: { id }, include: REQUEST_INCLUDE });
@@ -795,7 +841,10 @@ export class CreationService {
     // Only a freshly paid request starts creation; CREATING and FAILED resume one. Every other
     // status has neither edge, so an API caller still cannot skip a step.
     const status = transition(request.status as Status, request.status === 'PAID' ? 'start_creation' : 'retry');
-    await this.deps.db.creationRequest.update({ where: { id }, data: { status, attempts: { increment: 1 }, failureCode: null, failureDetail: null } });
+    // The registry key is written before anything is broadcast, so the stream can name this
+    // request the moment the chain announces its market — even if this process dies first.
+    await this.deps.db.creationRequest.update({ where: { id }, data: { status, attempts: { increment: 1 }, failureCode: null, failureDetail: null,
+      ...(request.kind === 'SINGLE' ? { creationId: creationId(id) } : {}) } });
     // Everything past the move into CREATING runs inside the catch: a throw that escaped it would
     // leave the request in a state whose failure nothing had recorded.
     try {
@@ -814,6 +863,7 @@ export class CreationService {
           where: { id }, data: { status: 'CREATED', marketAddress: created.market, creationTxHash: transactionHash },
         });
         await this.recordCreation(tx, request, { address: created.market, transactionHash });
+        await this.announceCreation(tx, { requestId: id, marketAddress: created.market, question: draft.question, transactionHash, status: 'CREATED' });
         return row;
       });
     } catch (error) {
@@ -852,7 +902,7 @@ export class CreationService {
       if (child.status === 'CREATED' && child.marketAddress) continue;
       const draft = draftSchema.parse(child.draft);
       await this.deps.db.creationChild.update({
-        where: { id: child.id }, data: { status: 'CREATING', attempts: { increment: 1 }, failureCode: null, failureDetail: null },
+        where: { id: child.id }, data: { status: 'CREATING', attempts: { increment: 1 }, failureCode: null, failureDetail: null, creationId: creationId(id, child.position) },
       });
       try {
         const created = await this.deps.deployer!.create({
@@ -869,6 +919,7 @@ export class CreationService {
           // that failed publishes nothing, and a retry that skips an existing child records
           // nothing new, because the statement's id is derived from the request and position.
           await this.recordCreation(tx, request, { address: created.market, transactionHash, position: child.position });
+          await this.announceCreation(tx, { requestId: id, position: child.position, marketAddress: created.market, question: draft.question, transactionHash, status: 'CREATING' });
           if (request.eventId) {
             // Stored lower-cased, as every address in this schema is: the unique index on it and
             // the lookup that finds a market's event both depend on one canonical form.

@@ -12,6 +12,7 @@ import { Audit } from './pages/Audit';
 import { CreateMarket } from './pages/CreateMarket';
 import { Admin } from './pages/Admin';
 import { DesignSystem } from './pages/DesignSystem';
+import { LiveNotices } from './components/LiveNotices';
 
 type Wallet = { account?: string; connect: () => Promise<void>; error?: string };
 const ConfigContext = createContext<AppConfig | undefined>(undefined);
@@ -85,6 +86,8 @@ export function App() {
               )}
             </>}
       </main>
+      {/* One live connection for the whole tab, and the creator's notices above the footer. */}
+      {!standalone && <LiveNotices />}
       <footer>
         Horizon settles on Ethereum Sepolia with test USDC. Markets are resolved by a disclosed centralized resolver;
         INVALID pays 0.5 USDC per outcome token. Zero trading fees; market creation is a separate paid service, and

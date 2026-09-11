@@ -22,6 +22,13 @@ const schema = z.object({
   MARKET_SYNC_INTERVAL_MS: blank(z.coerce.number().int().min(2_000).max(600_000).default(15_000)),
   MARKET_SYNC_MAX_STALENESS_MS: blank(z.coerce.number().int().min(5_000).max(3_600_000).default(120_000)),
   MARKET_SYNC_PAGE_SIZE: blank(z.coerce.number().int().min(10).max(1_000).default(200)),
+  // Live chain data. The stream consumer is its own process; the API only needs to know whether
+  // one is expected to be running, which is what `live.available` reports to the frontend.
+  STREAM_ENABLED: blank(z.enum(['true', 'false']).default('false').transform(value => value === 'true')),
+  SUBSTREAMS_ENDPOINT: blank(z.string().url().default('https://sepolia.eth.streamingfast.io:443')),
+  SUBSTREAMS_PACKAGE: blank(z.string().min(1).default('substreams/horizon-events-v0.1.0.spkg')),
+  SUBSTREAMS_MODULE: blank(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/).default('map_horizon_events')),
+  SUBSTREAMS_START_BLOCK: blank(z.coerce.number().int().min(0).default(11_663_746)),
 });
 
 /** Hedera x402 charge for the creation service only. It is unrelated to trading, which has no fee. */
@@ -36,6 +43,14 @@ export type AiConfig = { provider: 'anthropic' | 'development'; apiKey?: string;
 export type CreationConfig = { rpc: string; registry: Address; resolver: Address; privateKey?: Hex; minCloseInSeconds: number; maxCloseInSeconds: number };
 
 export type MarketSyncConfig = { enabled: boolean; intervalMs: number; maxStalenessMs: number; pageSize: number };
+/**
+ * The Substreams connection. `token` is a JWT issued for an API key and `apiKey` the key itself;
+ * either authenticates the stream, and neither is ever logged. The package is a local `.spkg` path
+ * or an https URL, and the start block is only used when no cursor has been stored yet.
+ */
+export type StreamConfig = {
+  enabled: boolean; endpoint: string; token?: string; apiKey?: string; package: string; module: string; startBlock: number;
+};
 /**
  * Public audit trail on the Hedera Consensus Service. The signer is a dedicated server-side
  * account whose key is the topic's submit key, so only this service can append to the trail; it
@@ -67,7 +82,7 @@ export type ImportsConfig = { enabled: boolean; polymarketApiOrigin: string; tim
 
 export type Config = z.infer<typeof schema> & {
   trading?: TradingConfig; creation?: CreationConfig; payments: PaymentsConfig; world: WorldConfig; ai: AiConfig;
-  marketSync: MarketSyncConfig; imports: ImportsConfig; audit: AuditConfig;
+  marketSync: MarketSyncConfig; imports: ImportsConfig; audit: AuditConfig; stream: StreamConfig;
 };
 
 const HEDERA_NETWORKS = ['testnet', 'previewnet', 'mainnet', 'local-node'] as const;
@@ -152,6 +167,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     marketSync: {
       enabled: result.data.MARKET_SYNC_ENABLED, intervalMs: result.data.MARKET_SYNC_INTERVAL_MS,
       maxStalenessMs: result.data.MARKET_SYNC_MAX_STALENESS_MS, pageSize: result.data.MARKET_SYNC_PAGE_SIZE,
+    },
+    stream: {
+      enabled: result.data.STREAM_ENABLED, endpoint: result.data.SUBSTREAMS_ENDPOINT,
+      token: env.SUBSTREAMS_API_TOKEN?.trim() || undefined, apiKey: env.SUBSTREAMS_API_KEY?.trim() || undefined,
+      package: result.data.SUBSTREAMS_PACKAGE, module: result.data.SUBSTREAMS_MODULE, startBlock: result.data.SUBSTREAMS_START_BLOCK,
     },
     payments: {
       facilitatorUrl: env.HEDERA_FACILITATOR_URL || 'https://api.testnet.blocky402.com',

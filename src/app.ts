@@ -16,15 +16,21 @@ import { creationRoutes } from './creation/http.js';
 import { adminRoutes } from './admin/http.js';
 import { eventRoutes } from './events/http.js';
 import { auditRoutes } from './audit/http.js';
+import { liveRoutes } from './live/http.js';
+import { LiveBus } from './live/bus.js';
 import { buildServices, publicConfig, type QueueBindings } from './services.js';
 
 AdminJS.registerAdapter({ Database, Resource });
 
 const WEB_DIST = resolve('web/dist');
 
-export async function createApp(config: Config, db: PrismaClient, queue: QueueBindings = {}) {
+export async function createApp(config: Config, db: PrismaClient, queue: QueueBindings = {}, options: { live?: boolean } = {}) {
   const app = express();
   const services = buildServices(config, db, queue);
+  // The live bus is always started when asked: creation notices flow through it whether or not a
+  // stream consumer is running, since the worker's receipt path announces through the same log.
+  const bus = options.live === false ? undefined : new LiveBus(db, config.DATABASE_URL);
+  if (bus) await bus.start();
   app.disable('x-powered-by');
   app.set('trust proxy', config.TRUST_PROXY_HOPS);
 
@@ -59,6 +65,7 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
   app.get('/api/config', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }),
     (_req, res) => res.json(publicConfig(config, services)));
   app.use('/api/audit', auditRoutes(services.audit));
+  app.use('/api', liveRoutes(bus, services.creation));
   app.use('/api', eventRoutes(services.events, services.markets));
   app.use('/api', tradingRoutes(config.trading, services.markets, services.events));
   app.get('/health/live', (_req, res) => res.json({ status: 'ok', service: 'horizon-api' }));
@@ -85,6 +92,8 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
       ...['MarketEvent', 'EventMarket'].map(name => [name, 'Events'] as const),
       // Derived rows, grouped apart so an operator never mistakes the mirror for the source of truth.
       ...['MarketProjection', 'CurveProjection', 'SyncCheckpoint'].map(name => [name, 'Market mirror (read model)'] as const),
+      // What the stream recorded beside the mirror, and where it resumes from.
+      ...['StreamCheckpoint', 'Trade', 'Notification'].map(name => [name, 'Live layer'] as const),
     ].map(([name, group]) => ({
       resource: { model: getModelByName(name), client: db },
       options: {
@@ -147,5 +156,5 @@ export async function createApp(config: Config, db: PrismaClient, queue: QueueBi
     console.error('HTTP request failed; internal details withheld');
     res.status(500).json({ error: 'internal_error' });
   });
-  return { app, admin, services, close: async () => { store.close(); await pool.end(); } };
+  return { app, admin, services, bus, close: async () => { store.close(); await bus?.stop(); await pool.end(); } };
 }

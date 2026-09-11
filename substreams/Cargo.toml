@@ -1,0 +1,31 @@
+[package]
+name = "horizon-events"
+version = "0.1.0"
+description = "Horizon contract events for the live layer"
+edition = "2021"
+publish = false
+
+[lib]
+name = "horizon_events"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+hex = "0.4"
+prost = "0.13"
+prost-types = "0.13"
+substreams = "0.6"
+substreams-ethereum = "0.10"
+
+# Required so that ethabi > ethereum-types build correctly under wasm32-unknown-unknown.
+[target.wasm32-unknown-unknown.dependencies]
+getrandom = { version = "0.2", features = ["custom"] }
+
+[build-dependencies]
+anyhow = "1"
+substreams-ethereum = "0.10"
+
+[profile.release]
+lto = true
+opt-level = 's'
+strip = "debuginfo"

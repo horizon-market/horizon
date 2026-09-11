@@ -78,6 +78,60 @@ Queue retries do not guarantee exactly-once external effects. Later payment and 
 
 Compiled processes are available with `npm run build`, then `npm start` and `npm run worker`. Deployment needs a persistent worker runtime, managed database credentials, HTTPS, and correctly scoped `TRUST_PROXY_HOPS`; no public hosting was configured in this phase.
 
+## Live layer: the stream consumer
+
+A third process. It holds one Substreams connection open, records every block's Horizon events
+beside the market mirror (see "Live layer" in `docs/ARCHITECTURE.md`), and wakes the API over
+Postgres so open tabs update without a page reload. It holds no key and touches none of the
+tables the sync sweep owns; with it stopped, every read is exactly what it was before, only
+later.
+
+```sh
+# One-time: build and pack the Substreams module. Needs the Rust toolchain with the
+# wasm32-unknown-unknown target and the substreams CLI (https://docs.substreams.dev).
+rustup target add wasm32-unknown-unknown
+npm run substreams:pack            # writes substreams/horizon-events-v0.1.0.spkg and deployments/substreams.json
+# Credential: either a JWT from `substreams auth` (SUBSTREAMS_API_TOKEN) or an API key from
+# The Graph Market (SUBSTREAMS_API_KEY). Then:
+STREAM_ENABLED=true npm run stream:dev
+```
+
+The consumer resumes from `StreamCheckpoint.cursor`; without one it starts at
+`SUBSTREAMS_START_BLOCK`. It reconnects with backoff on any failure, reads blocks strictly in
+order — the next block is not requested until the previous one is committed — and applies undo
+signals. Every recorded block is logged with its counts; a block that recorded nothing new is
+reported as `replayed: true`.
+
+**Railway.** Add a third service from the same repository with start command `npm run stream`
+and the same `DATABASE_URL`, plus `STREAM_ENABLED=true`, the credential and
+`SUBSTREAMS_PACKAGE` (commit the `.spkg` or point at an https URL). Migrations are applied the
+way they are for the other services (`railway ssh`, see above); the consumer starts cleanly
+against a migrated database with no checkpoint. The API needs `STREAM_ENABLED=true` too, so
+`/api/config` reports live updates as available; the `LiveBus` itself always runs.
+
+**If the cursor is lost** (a wiped `StreamCheckpoint`), the consumer restarts from
+`SUBSTREAMS_START_BLOCK` and replays history: nothing is duplicated, because every row is keyed
+by its transaction and log, but the replay takes as long as the range is wide. Set the start
+block to a recent one if the history is not needed; the sync sweep covers everything older.
+
+**Legacy creation requests.** Requests created before the `creationId` column are matched by
+their market address. `npm run creation:backfill-ids` fills the column for them; it is safe to
+rerun.
+
+**Acceptance check.** With the worker stopped (or `MARKET_SYNC_ENABLED=false` on the API):
+
+```sh
+# Live: create a market and trade it (scripts/seed-phase2.ts, or the app), then
+npm run verify:live -- --api http://127.0.0.1:3001 --watch 0x<trade transaction hash> --sweep
+# Offline: feed recorded Sepolia blocks through the same processor
+npm run verify:live -- --api http://127.0.0.1:3001 --replay test/fixtures/substreams/sepolia-phase2.json --sweep
+```
+
+It checks that the market lists, its page loads, the trade is in its history and the creator's
+notice exists before any sweep, then runs one sweep from The Graph and checks the reads are
+unchanged. `npm run substreams:fixture` records new fixtures from transactions the database and
+the Subgraph know about (public RPCs cap `eth_getLogs`, so recording is receipt-driven).
+
 ## Verification
 
 ```sh

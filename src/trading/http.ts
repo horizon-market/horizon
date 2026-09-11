@@ -103,6 +103,13 @@ export function tradingRoutes(config?: TradingConfig, marketService?: MarketServ
       };
     });
   });
+  /** Trade history: indexed routes plus every route the stream has seen since the indexer's block. */
+  router.get('/markets/:market/trades', reads, async (req, res) => {
+    if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
+    const market = address.safeParse(req.params.market);
+    if (!market.success) { res.status(400).json({ error: 'invalid_market' }); return; }
+    await guard(res, () => markets.trades(market.data));
+  });
   router.get('/positions/:account', reads, async (req, res) => {
     if (!markets) { res.status(503).json({ error: 'trading_not_configured' }); return; }
     const account = address.safeParse(req.params.account);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, type HorizonEvent, type Market } from '../api';
-import { useAsync } from '../hooks';
+import { useAsync, useDebouncedReload, useLive, useLiveStatus } from '../hooks';
 import { Badge, Empty, ErrorBox, Loading, ZeroFee } from '../components/Ui';
 import { dateTime, price, shares, timeLeft, usdc } from '../format';
 
@@ -17,6 +17,13 @@ type Entry = { key: string; createdAt: number; open: boolean } & (
 export function Markets() {
   const listing = useAsync(() => api.markets(), []);
   const [filter, setFilter] = useState<Filter>('all');
+  const connected = useLiveStatus();
+  // A created market, a fill or a resolution anywhere changes this list; a block's worth of them
+  // is one refetch, and a reorg's withdrawal arrives the same way.
+  const refetch = useDebouncedReload(listing.reload);
+  useLive(event => {
+    if (['market.updated', 'liquidity.changed', 'snapshot.required'].includes(event.type)) refetch();
+  });
   if (listing.loading) return <Loading rows={6} label="Loading markets" />;
   if (listing.error) return <ErrorBox error={listing.error} retry={listing.reload} />;
   const data = listing.data!;
@@ -50,7 +57,9 @@ export function Markets() {
         </div>
       </div>
       <p className="small muted">
-        Discovery reads The Graph at indexed block {data.indexedBlock}. Prices and depth below are indexed estimates;
+        <span className={`live-dot${connected ? ' on' : ''}`} aria-hidden="true" />
+        Discovery reads The Graph at indexed block {data.indexedBlock}
+        {data.liveBlock ? `, with live changes through block ${data.liveBlock}` : ''}. Prices and depth below are indexed estimates;
         every order is re-checked and simulated against live chain state before you sign.
         {events.length > 0 && ' Grouped events show their outcomes together; each one is a separate market you can open on its own.'}
       </p>

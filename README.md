@@ -112,6 +112,7 @@ npm run db:generate && npm run db:migrate && npm run db:test:migrate
 npm run web:build         # the API serves web/dist when it exists
 npm run dev               # API and frontend
 npm run worker:dev        # second terminal: creation, resolution and sync jobs
+npm run stream:dev        # optional third terminal: live chain data over Substreams (STREAM_ENABLED=true and a credential)
 ```
 
 The application is then at `http://127.0.0.1:3001`. Market data, quoting and creation stay
@@ -126,7 +127,7 @@ Full instructions, configuration table and the deliberate write commands are in
 
 ```sh
 npm run typecheck && npm test          # TypeScript unit tests
-npm run test:integration               # PostgreSQL tests: payments, idempotency, job durability
+npm run test:integration               # PostgreSQL tests: payments, idempotency, job durability, the live layer and SSE
 npm run test:routes                    # Anvil end-to-end quote, simulation and execution
 npm run contracts:test                 # Foundry suite, including fuzz properties
 npm run vendor:verify                  # hashes of every pinned vendor file
