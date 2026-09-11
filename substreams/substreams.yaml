@@ -4,8 +4,8 @@ specVersion: v0.1.0
 package:
   name: horizon_events
   version: v0.1.0
-  url: https://github.com/xana-rahmani/horizon
-  doc: Horizon contract events for the live layer.
+  url: https://github.com/horizon-market/horizon
+  description: Horizon contract events for the live layer, one message per block.
 
 protobuf:
   files:

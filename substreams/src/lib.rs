@@ -13,7 +13,7 @@ mod abi;
 mod pb;
 
 use pb::horizon::v1::{self as horizon, horizon_event::Data, HorizonEvent, HorizonEvents};
-use substreams::store::{StoreGet, StoreGetString, StoreSetIfNotExists, StoreSetIfNotExistsString};
+use substreams::store::{StoreGet, StoreGetString, StoreNew, StoreSetIfNotExists, StoreSetIfNotExistsString};
 use substreams_ethereum::pb::eth::v2 as eth;
 use substreams_ethereum::Event;
 
