@@ -199,7 +199,8 @@ test('the public trail is readable by event slug and by market address, and veri
     // By address, upper-cased, for a child of a group: the whole request, with this child named.
     const byChild = await get(`/api/audit/markets/${CHILD_1.toUpperCase().replace('0X', '0x')}`);
     assert.equal(byChild.status, 200);
-    const childTrail = await byChild.json() as typeof singleTrail & { event: { slug: string; title: string } };
+    // `event` is null on a standalone trail and an object here; an intersection of the two is `never`.
+    const childTrail = await byChild.json() as Omit<typeof singleTrail, 'event'> & { event: { slug: string; title: string } };
     assert.equal(childTrail.market.address, CHILD_1.toLowerCase());
     assert.equal(childTrail.market.position, 1);
     assert.equal(childTrail.market.outcomeLabel, 'Second');
