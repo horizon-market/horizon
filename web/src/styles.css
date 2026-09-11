@@ -422,6 +422,16 @@ footer { border-top: 1px solid var(--border); color: var(--muted); font-size: va
 .card > dl.kv.total + *,
 .card > .notice + * { margin-top: var(--space-3); }
 .grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+/* The market listing: every row takes the tallest card's height, so every card is the same size.
+   A card is a column whose footer sits at the bottom, and the question is clamped so one long
+   title cannot stretch every other card. */
+.market-grid { grid-auto-rows: 1fr; }
+.market-grid > .card { display: flex; flex-direction: column; }
+.market-grid > .card > h3 {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.market-grid > .card > .card-foot { margin-top: auto; padding-top: var(--space-3); }
+.market-grid .prices { margin-bottom: 0; }
 .split { display: grid; gap: var(--space-4); grid-template-columns: 1fr; }
 @media (min-width: 860px) { .split { grid-template-columns: 3fr 2fr; align-items: start; } }
 .row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }

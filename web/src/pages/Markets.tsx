@@ -67,7 +67,7 @@ export function Markets() {
         ? <Empty title={entries.length === 0 ? 'No markets are indexed yet' : 'Nothing matches this filter'}>
             <p>Create the first one from the <a href="/create">Create market</a> page.</p>
           </Empty>
-        : <div className="grid">
+        : <div className="grid market-grid">
             {visible.map(entry => entry.kind === 'event'
               ? <EventCard key={entry.key} event={entry.event} />
               : <MarketCard key={entry.key} market={entry.market} />)}
@@ -99,7 +99,7 @@ function MarketCard({ market }: { market: Market }) {
           <div className="small muted">{depth(no.availableShares)}</div>
         </div>
       </div>
-      <div className="row between small muted">
+      <div className="card-foot row between small muted">
         <span>{market.liquidity.curves} live curve{market.liquidity.curves === 1 ? '' : 's'}</span>
         <span>{usdc(market.collateral)} collateral</span>
       </div>
@@ -113,7 +113,7 @@ function MarketCard({ market }: { market: Market }) {
  * and are never presented as one.
  */
 function EventCard({ event }: { event: HorizonEvent }) {
-  const shown = event.children.slice(0, 4);
+  const shown = event.children.slice(0, 3);
   const hidden = event.children.length - shown.length;
   const markets = event.children.flatMap(child => child.market ? [child.market] : []);
   const openMarkets = markets.filter(market => market.status === 'OPEN');
@@ -155,7 +155,7 @@ function EventCard({ event }: { event: HorizonEvent }) {
         ))}
       </ul>
       {hidden > 0 && <p className="small muted" style={{ margin: 0 }}>and {hidden} more outcome{hidden === 1 ? '' : 's'}</p>}
-      <div className="row between small muted" style={{ marginTop: 'var(--space-2)' }}>
+      <div className="card-foot row between small muted">
         <span>{event.outcomesComplete ? 'All source outcomes included' : 'A selection of outcomes, not the full set'}</span>
         <span>{usdc(event.stats.collateral)} collateral</span>
       </div>
