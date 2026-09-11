@@ -167,11 +167,14 @@ the market created on Sepolia under a creation id derived from its request id, a
 Graph. The frontend covers browsing, a market detail and order ticket, curve publishing, holdings
 and redemption, the creation workflow and an operator screen.
 
+World Selfie Check access has been granted for this app, and a credential has been verified end
+to end in Sandbox against the production deployment: the RP context, the widget, the server-side
+`action`/`environment`/`signal_hash` checks and the nullifier record all ran on the live path.
+
 Implemented but not yet exercised live: a browser-wallet Hedera settlement (the client renders
-live payment requirements but has settled nothing), and World Selfie Check verification — access
-is still pending, so no credential has been verified and no discount granted. Drafting runs its
-deterministic provider, labelled `development`, unless a model credential is configured; either
-way it is grounded on the same live indexed markets.
+live payment requirements but has settled nothing). Drafting runs its deterministic provider,
+labelled `development`, unless a model credential is configured; either way it is grounded on the
+same live indexed markets.
 
 ## Disclosed roles and limits
 

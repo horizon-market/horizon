@@ -36,7 +36,7 @@ x402, and World.
 - [x] Verify the deployed Aqua registry and the Horizon router on Sepolia.
 - [x] Establish trading-network RPC access, gas and test USDC.
 - [x] Confirm Graph Studio access and deploy a live indexing path.
-- [ ] Obtain World Selfie Check/Sandbox access.
+- [x] Obtain World Selfie Check/Sandbox access (granted; a credential verified in Sandbox on production).
 - [ ] Prove a Blocky402-settled Hedera payment from both an agent and a browser wallet
       (agent complete; browser wallet outstanding).
 - [x] Pin the Express/admin/ORM integration and the separate durable-worker setup.
