@@ -1,6 +1,7 @@
 import PgBoss from 'pg-boss';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import { auditFailure } from './audit/service.js';
 
 export const PROBE_QUEUE = 'system.probe';
 export const CREATION_QUEUE = 'creation.market';
@@ -140,7 +141,9 @@ export async function registerWorker(boss: PgBoss, db: PrismaClient, handlers: J
         // Worth a line: it names what is still open and why a request is not finished, which is
         // the only place an operator can see a topic problem without querying the outbox.
         if (report.status !== 'idle') console.log(`audit.publish ${requestId}: ${report.status}, ${report.published} published`);
-      } catch { console.error('Audit publication attempt failed; the statement stays in the outbox'); }
+      } catch (error) {
+        console.error('Audit publication attempt failed; the statement stays in the outbox', auditFailure(error));
+      }
     }
   });
   await boss.work<ResolutionJobData>(RESOLUTION_QUEUE, { pollingIntervalSeconds: 2 }, async jobs => {

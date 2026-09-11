@@ -1,6 +1,7 @@
 import { loadConfig, databaseUrl } from './config.js';
 import { createDatabase } from './db.js';
 import { buildServices } from './services.js';
+import { auditFailure } from './audit/service.js';
 import { startQueue, registerWorker, enqueueAuditPublish, enqueueCreation, enqueueResolution, enqueueMarketSync } from './jobs.js';
 
 const url = databaseUrl();
@@ -43,9 +44,10 @@ if (services.audit.publishing) {
     const due = await services.audit.due(20);
     for (const requestId of due) await enqueueAuditPublish(boss, requestId);
   };
-  await sweep().catch(() => console.error('Audit outbox sweep failed; retrying on the next tick'));
-  auditTicker = setInterval(() => { void sweep().catch(() => console.error('Audit outbox sweep failed; retrying on the next tick')); },
-    config.audit.publishIntervalMs);
+  const sweepFailed = (error: unknown) =>
+    console.error('Audit outbox sweep failed; retrying on the next tick', auditFailure(error));
+  await sweep().catch(sweepFailed);
+  auditTicker = setInterval(() => { void sweep().catch(sweepFailed); }, config.audit.publishIntervalMs);
   auditTicker.unref();
 }
 

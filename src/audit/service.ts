@@ -24,6 +24,23 @@ export type AuditDependencies = {
 
 export type PublishReport = { status: 'published' | 'idle' | 'blocked' | 'not_configured'; published: number; pending: number };
 
+/**
+ * Diagnostic categories for a failure on the publication path.
+ *
+ * A swallowed cause is not an operational report: an outbox sweep that fails every tick has to
+ * say why, or the only way to tell a missing migration from an unreachable database is to guess.
+ * The message itself is never logged — a Prisma error can carry the connection string — so this
+ * reports the error's name and its `P####` code, exactly as the market routes already do.
+ */
+export function auditFailure(error: unknown): { kind: string; code?: string } {
+  const code = error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : undefined;
+  return {
+    kind: error instanceof Error ? error.name : 'unknown',
+    // P2021 is a missing table, so an unapplied migration names itself here rather than hiding.
+    code: code && /^P\d{4}$/.test(code) ? code : undefined,
+  };
+}
+
 export class AuditService {
   constructor(private deps: AuditDependencies) {}
 
