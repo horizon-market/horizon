@@ -46,7 +46,10 @@ export async function runStream(config: StreamConfig, startCursor: string | unde
   const registry = createRegistry(substreamPackage);
   // The package's own type declarations resolve `@connectrpc/connect` through its CommonJS entry
   // while this module sees the ESM one; the runtime object is the same either way.
-  const transport = createConnectTransport({ baseUrl: config.endpoint, httpVersion: '2', interceptors: [await authorization(config)] }) as unknown as Parameters<typeof streamBlocks>[0];
+  // Pinged while open: at the chain head a block arrives every dozen seconds and nothing else
+  // moves on the wire, which is exactly when an intermediary decides the session is dead.
+  const transport = createConnectTransport({ baseUrl: config.endpoint, httpVersion: '2', interceptors: [await authorization(config)],
+    pingIntervalMs: 15_000, pingIdleConnection: true, pingTimeoutMs: 10_000 }) as unknown as Parameters<typeof streamBlocks>[0];
   const request = createRequest({
     substreamPackage, outputModule: config.module, productionMode: true, finalBlocksOnly: false,
     // Live blocks with undo signals, not final-only: one confirmation is not treated as finality.

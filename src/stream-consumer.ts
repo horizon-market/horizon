@@ -51,28 +51,33 @@ const housekeeping = setInterval(() => {
 }, 10 * 60_000);
 housekeeping.unref();
 
+// One line per entry: a hosted log collector interleaves multi-line objects from a busy process.
+const log = (message: string, detail: Record<string, unknown> = {}) => console.log(`${message} ${JSON.stringify(detail)}`);
 let attempt = 0;
+let lastHeartbeat = 0;
 while (!stopping) {
   const checkpoint = await db.streamCheckpoint.findUnique({ where: { id: STREAM_CHECKPOINT } });
   const cursor = checkpoint?.cursor || undefined;
-  console.log(`Stream consumer connecting: module ${config.stream.module}, ${cursor ? `resuming after block ${checkpoint!.blockNumber}` : `from block ${config.stream.startBlock}`}`);
+  log('Stream consumer connecting', { module: config.stream.module, ...(cursor ? { resumingAfter: checkpoint!.blockNumber } : { fromBlock: config.stream.startBlock }) });
   try {
     await runStream(config.stream, cursor, {
       onBlock: async block => {
         attempt = 0;
         const report = await processBlock({ db, decodeCurve }, block);
-        if (block.dropped) console.error('Stream events dropped: missing payload', { block: block.number, dropped: block.dropped });
-        if (report.events > 0) console.log('Stream block recorded', report);
+        if (block.dropped) console.error(`Stream events dropped: missing payload ${JSON.stringify({ block: block.number, dropped: block.dropped })}`);
+        if (report.events > 0) log('Stream block recorded', report);
+        // Empty blocks still advance the cursor; say so now and then, so a quiet stream is visibly alive.
+        else if (Date.now() - lastHeartbeat > 5 * 60_000) { lastHeartbeat = Date.now(); log('Stream at block', { block: block.number, finalBlock: block.finalBlock }); }
       },
       onUndo: async lastValid => {
         const report = await undoTo({ db }, lastValid);
-        console.log('Stream reorg applied', report);
+        log('Stream reorg applied', report);
       },
     }, controller.signal);
-    if (!stopping) console.log('Stream ended; reconnecting');
+    if (!stopping) log('Stream ended; reconnecting');
   } catch (error) {
     if (stopping) break;
-    console.error('Stream failed; reconnecting', describeStreamError(error));
+    console.error(`Stream failed; reconnecting ${JSON.stringify(describeStreamError(error))}`);
   }
   if (stopping) break;
   // Exponential backoff to a minute: a broken package or credential must not hammer the endpoint.
