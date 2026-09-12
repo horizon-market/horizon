@@ -37,11 +37,11 @@ type CurveState = {
   id: Hex; market?: Address; maker?: Address; flags?: number; startPrice?: number; endPrice?: number; maxShares?: bigint; salt?: Hex;
   filled: bigint; active: boolean; admitted: boolean; publishedAt?: number;
 };
-const fromIndexed = (curve: IndexedCurve): CurveState => ({
+const fromIndexed = (curve: IndexedCurve, admitted: boolean): CurveState => ({
   id: curve.id, market: curve.strategy.market, maker: curve.maker, flags: curve.strategy.flags, startPrice: curve.strategy.startPrice,
   endPrice: curve.strategy.endPrice, maxShares: curve.strategy.maxShares, salt: curve.strategy.salt, filled: curve.filled,
-  // The snapshot only carries executable depth, so a curve it lists is shipped and admitted.
-  active: true, admitted: true,
+  // Anything the snapshot carries is shipped and not docked; only its depth is also admitted.
+  active: true, admitted,
 });
 const patchCurve = (state: CurveState, patch: CurvePayload): CurveState => ({
   ...state,
@@ -68,16 +68,21 @@ export const applicable = (block: number, changes: OverlayChange[]) => changes
  * so nothing downstream can tell whether a market came from the indexer or from the stream.
  */
 export function applyOverlay(snapshot: IndexedSnapshot, changes: OverlayChange[], scope: { market?: string } = {}): Overlaid<IndexedSnapshot> {
-  const pending = applicable(snapshot.block, changes);
-  if (pending.length === 0) return { ...snapshot, liveBlock: null };
+  // What the snapshot knew but did not list is consumed here; the result lists depth only.
+  const { unadmitted = [], ...base } = snapshot;
+  const pending = applicable(base.block, changes);
+  if (pending.length === 0) return { ...base, liveBlock: null };
   const markets = new Map<string, Omit<IndexedMarket, 'curves'>>();
   const order: string[] = [];
   const curves = new Map<string, CurveState>();
-  for (const market of snapshot.markets) {
+  // A curve shipped before the snapshot and admitted after it: the admission is a patch with no
+  // terms of its own, so the terms are seeded from the snapshot for the patch to complete.
+  for (const curve of unadmitted) curves.set(curve.id.toLowerCase(), fromIndexed(curve, false));
+  for (const market of base.markets) {
     const { curves: depth, ...rest } = market;
     markets.set(market.id.toLowerCase(), { ...rest, id: market.id.toLowerCase() as Address });
     order.push(market.id.toLowerCase());
-    for (const curve of depth) curves.set(curve.id.toLowerCase(), fromIndexed(curve));
+    for (const curve of depth) curves.set(curve.id.toLowerCase(), fromIndexed(curve, true));
   }
   const added: string[] = [];
   for (const change of pending) {
@@ -115,7 +120,7 @@ export function applyOverlay(snapshot: IndexedSnapshot, changes: OverlayChange[]
     .sort((a, b) => a.id.localeCompare(b.id)).slice(0, 50)
     .map(state => ({ id: state.id, maker: state.maker!, filled: state.filled, strategy: {
       market: state.market!, flags: state.flags!, startPrice: state.startPrice!, endPrice: state.endPrice!, maxShares: state.maxShares!, salt: state.salt! } }));
-  return { block: snapshot.block, hash: snapshot.hash, liveBlock: newest(pending),
+  return { block: base.block, hash: base.hash, liveBlock: newest(pending),
     markets: ids.map(id => ({ ...markets.get(id)!, curves: depthOf(id) })) };
 }
 

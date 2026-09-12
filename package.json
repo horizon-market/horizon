@@ -46,6 +46,7 @@
     "demo:live": "node --env-file=.env --import tsx scripts/verify-phase2-live.ts",
     "demo:indexed": "node --env-file=.env --import tsx scripts/verify-phase2-indexed.ts",
     "agent:create": "node --env-file=.env --import tsx scripts/agent-create.ts",
+    "agent:research": "node --env-file=.env --import tsx scripts/agent-research.ts",
     "test:integration": "node --env-file-if-exists=.env --import tsx --test --test-concurrency=1 test/integration.test.ts test/creation.integration.test.ts test/projection.integration.test.ts test/events.integration.test.ts test/audit.integration.test.ts test/audit.public.integration.test.ts test/stream.integration.test.ts test/live.integration.test.ts",
     "vendor:verify": "node --import tsx scripts/verify-vendor.ts",
     "contracts:build": "forge build --root contracts",

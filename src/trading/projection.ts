@@ -74,7 +74,9 @@ export class MarketProjectionStore {
     });
     return { block: state.checkpoint.indexedBlock, hash: state.checkpoint.indexedHash as Hex, syncedAt: state.checkpoint.syncedAt,
       // Depth is what can actually fill: shipped and not docked is not enough without admission.
-      markets: rows.map(row => fromMarketRow(row, row.curves.filter(curve => curve.active && curve.admitted))) };
+      markets: rows.map(row => fromMarketRow(row, row.curves.filter(curve => curve.active && curve.admitted))),
+      // The rest still shipped is read beside the depth, so a live admission can promote it.
+      unadmitted: rows.flatMap(row => row.curves.filter(curve => curve.active && !curve.admitted).map(fromCurveRow)) };
   }
 
   /** Newest markets with their live curves, or null when the mirror is missing or stale. */

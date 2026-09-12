@@ -114,7 +114,8 @@ test('the store serves fresh mirrors and refuses stale ones', async () => {
   const market = marketAt(1);
   const active = curveAt(1, market);
   const inactive = curveAt(2, market, { active: false });
-  await syncMarkets(db, fakeGraph([market], [active, inactive]), { pageSize: 50 });
+  const shipped = curveAt(3, market, { admitted: false });
+  await syncMarkets(db, fakeGraph([market], [active, inactive, shipped]), { pageSize: 50 });
 
   const fresh = new MarketProjectionStore(db, 60_000);
   const snapshot = await fresh.indexedMarkets();
@@ -123,8 +124,10 @@ test('the store serves fresh mirrors and refuses stale ones', async () => {
   // Discovery shows live curves only; a maker still sees their cancelled ones.
   assert.equal(snapshot?.markets[0]?.curves.length, 1);
   assert.equal(snapshot?.markets[0]?.collateral, 1_000_000n);
+  // A shipped order awaiting admission rides beside the depth, for the live layer to promote.
+  assert.deepEqual(snapshot?.unadmitted?.map(curve => curve.id), [shipped.id]);
   const maker = await fresh.curvesByMaker(active.maker);
-  assert.equal(maker?.curves.length, 2);
+  assert.equal(maker?.curves.length, 3);
   assert.equal(maker?.curves[0]?.question, market.question);
 
   const one = await fresh.indexedMarket(market.id);

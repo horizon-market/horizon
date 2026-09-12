@@ -10,13 +10,18 @@ const strategySchema = z.object({ id: z.string().regex(/^0x[0-9a-fA-F]{64}$/), m
 export type Discovered = { id: Hex; maker: Address; strategy: Curve };
 // `admitted` is what makes an order executable: shipping to Aqua without the router's admission
 // publishes nothing Horizon will fill, so such an order is not depth and never reaches discovery.
+// It is still read, beside the depth: publication is two transactions, and a snapshot taken between
+// them is the only place the live layer can find the terms once the admission arrives.
+const STRATEGY_FIELDS = 'id maker flags startPrice endPrice maxShares salt filled';
 const MARKET_FIELDS = `id creationId question rules evidenceSource closeAt resolver yesToken noToken result resolutionEvidence collateral createdAt
-        strategies(first: 50, where: { active: true, admitted: true }, orderBy: id) { id maker flags startPrice endPrice maxShares salt filled }`;
+        strategies(first: 50, where: { active: true, admitted: true }, orderBy: id) { ${STRATEGY_FIELDS} }
+        unadmitted: strategies(first: 50, where: { active: true, admitted: false }, orderBy: id) { ${STRATEGY_FIELDS} }`;
 const marketSchema = z.object({
   id: address, creationId: z.string(), question: z.string().max(400), rules: z.string().max(4000),
   evidenceSource: z.string().max(1000), closeAt: integer, resolver: address, yesToken: address, noToken: address,
   result: z.number().int().min(0).max(3), resolutionEvidence: z.string().max(2000), collateral: integer, createdAt: integer,
   strategies: z.array(strategySchema.omit({ market: true }).extend({ filled: integer })).max(50),
+  unadmitted: z.array(strategySchema.omit({ market: true }).extend({ filled: integer })).max(50),
 });
 const snapshotSchema = z.object({
   _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }),
@@ -28,7 +33,12 @@ export type IndexedMarket = {
   resolver: Address; yesToken: Address; noToken: Address; result: number; resolutionEvidence: string;
   collateral: bigint; createdAt: number; curves: IndexedCurve[];
 };
-export type IndexedSnapshot = { block: number; hash: Hex; markets: IndexedMarket[] };
+/**
+ * `markets[].curves` is executable depth. `unadmitted` is what the snapshot knows but does not list:
+ * curves shipped to Aqua and not yet admitted by the router at the snapshot block. The live layer
+ * needs their terms, because an admission is a patch that carries none of its own.
+ */
+export type IndexedSnapshot = { block: number; hash: Hex; markets: IndexedMarket[]; unadmitted?: IndexedCurve[] };
 const marketRef = z.object({ id: address, question: z.string().max(400) });
 const activitySchema = z.object({
   _meta: z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() }),
@@ -55,22 +65,24 @@ const makerCurvesSchema = z.object({
 export type MakerCurve = OperatorCurve & { closeAt: number; result: number; yesToken: Address; noToken: Address };
 function toSnapshot(data: z.infer<typeof snapshotSchema>): IndexedSnapshot {
   if (data._meta.hasIndexingErrors) throw new GraphError('graph_indexing_errors');
+  const toCurve = (market: Address, strategy: z.infer<typeof marketSchema>['strategies'][number]): IndexedCurve => ({
+    id: strategy.id as Hex, maker: strategy.maker as Address, filled: BigInt(strategy.filled),
+    strategy: { market, flags: strategy.flags, startPrice: Number(strategy.startPrice),
+      endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), salt: strategy.salt as Hex } });
   return { block: data._meta.block.number, hash: data._meta.block.hash as Hex, markets: data.markets.map(market => ({
     id: market.id as Address, creationId: market.creationId, question: market.question, rules: market.rules,
     evidenceSource: market.evidenceSource, closeAt: Number(market.closeAt), resolver: market.resolver as Address,
     yesToken: market.yesToken as Address, noToken: market.noToken as Address, result: market.result,
     resolutionEvidence: market.resolutionEvidence, collateral: BigInt(market.collateral), createdAt: Number(market.createdAt),
-    curves: market.strategies.map(strategy => ({ id: strategy.id as Hex, maker: strategy.maker as Address, filled: BigInt(strategy.filled),
-      strategy: { market: market.id as Address, flags: strategy.flags, startPrice: Number(strategy.startPrice),
-        endPrice: Number(strategy.endPrice), maxShares: BigInt(strategy.maxShares), salt: strategy.salt as Hex } })),
-  })) };
+    curves: market.strategies.map(strategy => toCurve(market.id as Address, strategy)),
+  })), unadmitted: data.markets.flatMap(market => market.unadmitted.map(strategy => toCurve(market.id as Address, strategy))) };
 }
 /** One market row as the projection stores it: no nested curves, so a sweep can page both flat. */
 export type ProjectedMarket = Omit<IndexedMarket, 'curves'>;
 export type ProjectedCurve = { id: Hex; market: Address; maker: Address; flags: number; startPrice: number;
   endPrice: number; maxShares: bigint; filled: bigint; salt: Hex; active: boolean; admitted: boolean; publishedAt: number };
 const meta = z.object({ block: z.object({ number: z.number().int(), hash: z.string() }), hasIndexingErrors: z.boolean() });
-const pagedMarketsSchema = z.object({ _meta: meta, markets: z.array(marketSchema.omit({ strategies: true })).max(1000) });
+const pagedMarketsSchema = z.object({ _meta: meta, markets: z.array(marketSchema.omit({ strategies: true, unadmitted: true })).max(1000) });
 const pagedStrategiesSchema = z.object({ _meta: meta,
   strategies: z.array(strategySchema.extend({ filled: integer, active: z.boolean(), admitted: z.boolean(), publishedAt: integer })).max(1000) });
 

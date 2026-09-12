@@ -66,6 +66,26 @@ test('a shipped curve becomes depth only once it is admitted, and only in its ow
   assert.equal(applyOverlay(snapshot(), [{ ...admitted, blockNumber: 101, logIndex: 0 }, { ...shipped, blockNumber: 101, logIndex: 1 }]).markets[0]!.curves.length, 2);
 });
 
+test('a curve shipped before the snapshot and admitted after it becomes depth from the admission alone', () => {
+  // Publication is two transactions. A sweep between them lists the curve as unadmitted, and the
+  // stream then records only the admission — a patch that carries none of the curve's terms.
+  const shipped = { id: NEW_ORDER, maker: MAKER, filled: 0n, strategy: {
+    market: MARKET, flags: 5, startPrice: 300_000, endPrice: 300_000, maxShares: 5_000_000n, salt: hex(0x5b, 32) } };
+  const known = { ...snapshot(), unadmitted: [shipped] };
+  assert.equal(applyOverlay(known, []).markets[0]!.curves.length, 1);
+  assert.equal('unadmitted' in applyOverlay(known, []), false);
+  const admitted = change({ entity: 'curve', key: NEW_ORDER, kind: 'STRATEGY_ADMITTED', maker: MAKER, blockNumber: 102, payload: { market: MARKET, maker: MAKER, admitted: true } });
+  const result = applyOverlay(known, [admitted], { market: MARKET });
+  assert.equal(result.markets[0]!.curves.length, 2);
+  assert.deepEqual(result.markets[0]!.curves.find(curve => curve.id === NEW_ORDER), shipped);
+  assert.equal('unadmitted' in result, false);
+  // Without the snapshot's knowledge the same patch is an incomplete curve, and never depth.
+  assert.equal(applyOverlay(snapshot(), [admitted]).markets[0]!.curves.length, 1);
+  // A cancellation in the same window keeps it out.
+  const docked = change({ entity: 'curve', key: NEW_ORDER, kind: 'DOCKED', maker: MAKER, blockNumber: 103, payload: { active: false } });
+  assert.equal(applyOverlay(known, [admitted, docked]).markets[0]!.curves.length, 1);
+});
+
 test('resolution and collateral patches reach the market row', () => {
   const result = applyOverlay(snapshot(), [
     change({ entity: 'market', key: MARKET, kind: 'COLLATERAL_CHANGED', payload: { collateral: '2500000' } }),
