@@ -25,6 +25,9 @@ export function MarketOrder({ market, side, account, onDone, onSwitchToLimit, re
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<{ code: string; message: string } | undefined>();
   const [tx, setTx] = useState<TxState>({ phase: 'idle' });
+  // Bumped when an approval confirms: the same order is re-quoted against the new allowance, and
+  // the ticket moves on from "Approve" to the trade itself without the trader touching the amount.
+  const [approvals, setApprovals] = useState(0);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => { const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000); return () => clearInterval(timer); }, []);
 
@@ -41,8 +44,12 @@ export function MarketOrder({ market, side, account, onDone, onSwitchToLimit, re
   // would queue work the trader has already moved past and exhaust the service's own capacity.
   const inFlight = useRef(false);
   const wanted = useRef<string | undefined>(undefined);
+  // A changed order voids whatever the last transaction said; a re-price after an approval keeps
+  // that approval's confirmation on screen while the new figures load.
+  useEffect(() => { setTx({ phase: 'idle' }); },
+    [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString(), refreshKey]);
   useEffect(() => {
-    setQuote(undefined); setError(undefined); setTx({ phase: 'idle' });
+    setQuote(undefined); setError(undefined);
     if (!account || shareAmount.error || !shareAmount.value) { wanted.current = undefined; return; }
     const request = { market, account, recipient: account, isYes: side.isYes, isBuy: side.isBuy,
       shares: shareAmount.value.toString(), slippageBps };
@@ -69,7 +76,7 @@ export function MarketOrder({ market, side, account, onDone, onSwitchToLimit, re
     };
     const timer = setTimeout(() => void run(), 700);
     return () => clearTimeout(timer);
-  }, [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString(), refreshKey]);
+  }, [market, account, side.isYes, side.isBuy, slippageBps, shareAmount.value?.toString(), refreshKey, approvals]);
 
   const expired = quote ? quote.deadline <= now : false;
   const busy = tx.phase === 'signing' || tx.phase === 'pending';
@@ -86,6 +93,7 @@ export function MarketOrder({ market, side, account, onDone, onSwitchToLimit, re
       if (status !== 'success') { setTx({ phase: 'error', hash, message: 'The transaction reverted. Prices moved; try again.' }); return; }
       setTx({ phase: 'confirmed', hash });
       if (action === 'execute') onDone();
+      else setApprovals(count => count + 1);
     } catch (issue) { setTx({ phase: 'error', message: describeWalletError(issue) }); }
   };
 
