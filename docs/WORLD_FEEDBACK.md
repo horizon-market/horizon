@@ -3,12 +3,13 @@
 Feedback from integrating World Selfie Check into Horizon's market-creation flow, where a
 verified human pays a lower creation price.
 
-**Status, stated plainly:** the integration is fully implemented and tested, but
-`WORLD_SELFIE_ACCESS` is still `unknown` for this app, so **no credential has been verified and no
-discount has been granted**. Everything below that describes SDK and API behaviour is drawn from
-the code we wrote against `@worldcoin/idkit` and `@worldcoin/idkit-core` **4.2.3** and can be
-checked in this repository. Sections marked *Needs a completed Sandbox run* are deliberately left
-for the builder to fill in from their own Developer Portal experience rather than guessed at.
+**Status, stated plainly:** the integration is fully implemented and tested. Access was granted
+late in the hackathon (September 12, 2026); a credential has been verified in Sandbox against the
+production deployment and a creation was then paid at the discounted 0.5 HBAR price over Hedera
+x402. Everything below that describes SDK and API behaviour is drawn from the code we wrote
+against `@worldcoin/idkit` and `@worldcoin/idkit-core` **4.2.3** and can be checked in this
+repository. The section *Not yet captured* lists the Sandbox observations we have not written up
+rather than guessing at them.
 
 ## What we built
 
@@ -77,22 +78,22 @@ Relevant code: `src/world/verifier.ts`, `src/creation/service.ts`,
 - Document the recommended lazy-loading pattern and the WASM size implication.
 - Surface access status and its expected timeline in the Portal.
 
-## Needs a completed Sandbox run
+## Not yet captured
 
-Left blank on purpose — these require the builder's own Portal session and a granted credential,
-and we will not invent them:
+Access arrived on the last day, so these were not written up systematically and are left blank
+rather than invented:
 
 - Developer Portal walkthrough: app and action creation, RP key issuance, and anything surprising.
 - Exact Sandbox error strings for a wrong action, an expired RP signature and a reused nullifier,
   and whether they are actionable.
 - Observed latency and drop-off of the Selfie Check capture itself.
-- The verified-versus-standard payment requirement, captured side by side, once a credential
-  verifies. The API already emits both; only the credential is missing.
+- The verified-versus-standard payment requirement, captured side by side. The API emits both and
+  the discounted requirement has been paid once; the two 402 bodies are not yet recorded here.
 
 ## Reproducing the current state
 
 ```sh
-npm run doctor        # reports World as pending while access is not granted
+npm run doctor        # reports World as pending until the discounted transaction id is recorded
 npm test              # includes the action, environment and signal-binding rejection tests
 ```
 

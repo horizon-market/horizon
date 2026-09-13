@@ -74,7 +74,7 @@ key becomes the topic's submit key, so only this service can append a statement.
 npm run typecheck && npm test          # 18 unit tests
 npm run test:integration               # 13 PostgreSQL tests; needs horizon_test
 npm run test:routes                    # Anvil end-to-end quote, simulation and execution
-npm run contracts:test                 # 39 Foundry tests
+npm run contracts:test                 # 54 Foundry tests
 npm run vendor:verify                  # 329 pinned vendor file hashes
 npm run build && npm run web:build
 npm run subgraph:prepare && npm run subgraph:codegen && npm run subgraph:build

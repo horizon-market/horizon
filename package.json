@@ -43,6 +43,7 @@
     "verify:live": "node --env-file=.env --import tsx scripts/verify-live.ts",
     "demo:seed": "node --env-file=.env --import tsx scripts/seed-phase2.ts",
     "demo:curves": "node --env-file=.env --import tsx scripts/seed-demo-curves.ts",
+    "demo:video": "node --import tsx scripts/demo-video.ts",
     "demo:live": "node --env-file=.env --import tsx scripts/verify-phase2-live.ts",
     "demo:indexed": "node --env-file=.env --import tsx scripts/verify-phase2-indexed.ts",
     "agent:create": "node --env-file=.env --import tsx scripts/agent-create.ts",

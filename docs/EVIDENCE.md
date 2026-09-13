@@ -95,8 +95,11 @@ outcome. The references inside each statement are what let a reader check those 
 sources, which is done below. Delivery is at least once — a reconciled resubmission can appear
 twice, and readers deduplicate by `eventId`.
 
-Thirteen statements are published, at topic sequence numbers 1–13, contiguous and in order. All
-thirteen were read back from the mirror node and matched the stored statement **byte for byte**.
+When the trail was first verified (September 11, 2026), thirteen statements were published, at
+topic sequence numbers 1–13, contiguous and in order. All thirteen were read back from the mirror
+node and matched the stored statement **byte for byte**. The topic has kept growing with every
+creation since — 62 statements on September 13, 2026 — and each event and market page verifies its
+own statements the same way through `?verify=1` (an example is at the end of this section).
 
 ### One complete chain: request `b6414cd3-7110-4832-978b-8ccf1202ce00`
 
@@ -188,7 +191,7 @@ Verified on the current tree:
 
 | Check | Result |
 | --- | --- |
-| `npm run contracts:test` | 39 Foundry tests, including three 256-case fuzz properties |
+| `npm run contracts:test` | 54 Foundry tests, including three 256-case fuzz properties |
 | `npm run test:routes` | Anvil end-to-end: 44 contract/TypeScript pricing comparisons, whole-route simulation, execution, exhaustion and reorg rejection |
 | `npm test` | 18 TypeScript unit tests |
 | `npm run test:integration` | 13 PostgreSQL tests covering payment idempotency, requirement binding, ambiguous settlement, discount limits, authorization and job durability |

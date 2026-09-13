@@ -84,8 +84,9 @@ flowchart LR
 | Indexing | A Subgraph deployed to The Graph Studio |
 | Data | PostgreSQL 18 for requests, payments, sessions, jobs and the market mirror |
 
-The API process serves the built frontend, so a deployment is two processes and one database.
-`railway.json` configures that layout for Railway; nothing in the code is provider-specific.
+The API process serves the built frontend, so a deployment is three processes — API, worker and
+the Substreams stream consumer — and one database. `railway.json` configures that layout for
+Railway; nothing in the code is provider-specific.
 
 ## Repository layout
 
@@ -160,9 +161,9 @@ Transactions, block numbers and live re-checks are listed in [docs/EVIDENCE.md](
 ## Status
 
 Demonstrated on public networks: an atomic two-curve route on Sepolia and its indexed result, a
-public audit trail of thirteen statements on a Hedera Consensus Service topic — each read back
-from the mirror node byte for byte, with the payment and market they reference verified at their
-own sources — and an agent-owned client completing a paid creation end to end — 1 HBAR settled on Hedera testnet,
+public audit trail on a Hedera Consensus Service topic (62 statements at submission) — each read
+back from the mirror node byte for byte, with the payment and market they reference verified at
+their own sources — and an agent-owned client completing a paid creation end to end — 1 HBAR settled on Hedera testnet,
 the market created on Sepolia under a creation id derived from its request id, and indexed by The
 Graph. The frontend covers browsing, a market detail and order ticket, curve publishing, holdings
 and redemption, the creation workflow and an operator screen.

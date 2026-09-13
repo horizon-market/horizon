@@ -152,7 +152,7 @@ npm run test:integration
 
 For a pre-existing Docker volume created before the initialization SQL was added, create the missing test database once with `docker compose exec db createdb -U horizon horizon_test`, then apply its migration. Initialization scripts do not rerun against an existing volume.
 
-Verified locally: TypeScript typecheck/build; **8 unit tests**; **3 PostgreSQL integration tests** covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry; **39 Foundry tests** including three 256-case fuzz properties; and **1 isolated Anvil integration test** with 44 contract/TypeScript pricing comparisons, whole-route simulation and execution, exhaustion, and reorg checks. The Subgraph builds and is live; a real Graph-backed route executed two Sepolia fills, and Graph indexed the resulting collateral and exhausted curves. The 329 vendor file hashes remain unchanged. Remote CI is configured but has not run.
+Verified locally: TypeScript typecheck/build; **8 unit tests**; **3 PostgreSQL integration tests** covering authenticated read-only admin, persisted jobs across worker startup/restart, duplicate effects, and retry; **54 Foundry tests** including three 256-case fuzz properties; and **1 isolated Anvil integration test** with 44 contract/TypeScript pricing comparisons, whole-route simulation and execution, exhaustion, and reorg checks. The Subgraph builds and is live; a real Graph-backed route executed two Sepolia fills, and Graph indexed the resulting collateral and exhausted curves. The 329 vendor file hashes remain unchanged. Remote CI is configured but has not run.
 
 ### Events, groups and Polymarket imports
 
@@ -197,7 +197,8 @@ unreachable topic delays the trail and cannot repeat a payment, repeat a deploym
 creation.
 
 Live since September 11, 2026 on topic `0.0.10473191` (Hedera testnet), whose submit key is the
-audit signer's. Thirteen statements are published at sequence numbers 1–13; see
+audit signer's. The first thirteen statements (sequence numbers 1–13) were verified byte for byte
+against the mirror node and the topic has grown with every creation since; see
 [docs/EVIDENCE.md](docs/EVIDENCE.md).
 
 ```sh
